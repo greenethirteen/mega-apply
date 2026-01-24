@@ -1,0 +1,14 @@
+{
+  "name": "rapidapply-saudi-addon",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node -r dotenv/config src/entry.js",
+    "scrape": "node -r dotenv/config src/entry.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "firebase-admin": "^12.5.0"
+  }
+}

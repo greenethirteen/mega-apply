@@ -1,0 +1,4 @@
+[RapidApply SA] Starting scraper: pages=2, pauseMs=350
+[list] https://www.saudijobs.in/index?page=1
+[list] https://www.saudijobs.in/index?page=2
+[RapidApply SA] Done. found=0, errors=0

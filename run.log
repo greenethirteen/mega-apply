@@ -1,0 +1,21 @@
+[RapidApply SA] Starting scraper: pages=1, pauseMs=350
+[firebase] writing disabled via FIREBASE_DISABLED=1
+[list] https://www.saudijobs.in/index?page=1
+[debug] status=200
+[links] page 1: found 15
+[WROTE] {"title":"RECENT JOBS","category":"Other","location":"Saudi Arabia","email":null,"emails":[]}
+[WROTE] {"title":"RECENT JOBS","category":"Other","location":"Saudi Arabia","email":"mohammadk.amran5kam@gmail.com","emails":["mohammadk.amran5kam@gmail.com"]}
+[WROTE] {"title":"RECENT JOBS","category":"Other","location":"Saudi Arabia","email":"jobs.arc2025@gmail.com","emails":["jobs.arc2025@gmail.com"]}
+[WROTE] {"title":"RECENT JOBS","category":"Other","location":"Saudi Arabia","email":"shahbazali06988@gmail.com","emails":["shahbazali06988@gmail.com"]}
+[WROTE] {"title":"RECENT JOBS","category":"Other","location":"Saudi Arabia","email":"cv.alghat@gmail.com","emails":["cv.alghat@gmail.com"]}
+[WROTE] {"title":"RECENT JOBS","category":"Other","location":"Saudi Arabia","email":"iabdulkarim@sracohr.com","emails":["iabdulkarim@sracohr.com"]}
+[WROTE] {"title":"RECENT JOBS","category":"Other","location":"Saudi Arabia","email":"mohammadmaheen3@gmail.com","emails":["mohammadmaheen3@gmail.com"]}
+[WROTE] {"title":"RECENT JOBS","category":"Other","location":"Saudi Arabia","email":"info@ithracc.com","emails":["info@ithracc.com"]}
+[WROTE] {"title":"RECENT JOBS","category":"Other","location":"Saudi Arabia","email":"job@ais.sa","emails":["job@ais.sa"]}
+[WROTE] {"title":"RECENT JOBS","category":"Other","location":"Saudi Arabia","email":"Kshahanshah52@gmail.com","emails":["Kshahanshah52@gmail.com"]}
+[WROTE] {"title":"RECENT JOBS","category":"Other","location":"Saudi Arabia","email":"hrmhcm.gulf@gmail.com","emails":["hrmhcm.gulf@gmail.com"]}
+[WROTE] {"title":"RECENT JOBS","category":"Other","location":"Saudi Arabia","email":null,"emails":[]}
+[WROTE] {"title":"RECENT JOBS","category":"Other","location":"Saudi Arabia","email":"sanadunitedest@gmail.comDocuments","emails":["sanadunitedest@gmail.comDocuments","sanadunitedest@gmail.com"]}
+[WROTE] {"title":"RECENT JOBS","category":"Other","location":"Saudi Arabia","email":"sanadunitedest@gmail.com","emails":["sanadunitedest@gmail.com"]}
+[WROTE] {"title":"RECENT JOBS","category":"Other","location":"Saudi Arabia","email":"careersksa41@gmail.com","emails":["careersksa41@gmail.com"]}
+[RapidApply SA] Done. wrote=15, errors=0

@@ -1,0 +1,9 @@
+{
+  "HSE & Safety": ["hse","safety officer","safety supervisor","hse engineer","hse manager","safety engineer","risk","nebosh"],
+  "Procurement & Supply": ["procurement","purchasing","purchase","buyer","sourcing","supply chain"],
+  "Quantity Surveying": ["qs","quantity surveyor","estimation","cost control","boq","tendering"],
+  "Electrical Engineering": ["electrical","elv","low current","qa/qc electrical","substation"],
+  "Civil Engineering": ["civil","site engineer","construction"],
+  "Document Control & Admin": ["document controller","secretary","admin","document control"],
+  "Other": []
+}

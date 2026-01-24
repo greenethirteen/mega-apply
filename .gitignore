@@ -1,0 +1,15 @@
+node_modules
+.env
+.env.*
+.DS_Store
+serviceAccount.json
+.firebase
+runs/
+run*.log
+test*.log
+web/.next/
+web/out/
+web/node_modules/
+functions/node_modules/
+**/.env.local
+**/.env.*
