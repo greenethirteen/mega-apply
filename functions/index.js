@@ -445,7 +445,8 @@ async function sendEmployerEmail({ job, userProfile }) {
   if (!job.email) return false;
   const transporter = mailer();
 
-  const hasPhoto = Boolean(userProfile.photoPath);
+  const photoUrl = userProfile.photoUrl || "";
+  const hasPhoto = Boolean(photoUrl || userProfile.photoPath);
   const cvLink = userProfile.cvUrl || "";
   const jobLink = job.url || "";
   const displayJobTitle = preserveAcronyms(job.title || "");
@@ -454,7 +455,7 @@ async function sendEmployerEmail({ job, userProfile }) {
       <div style="width:96px;height:96px;border-radius:20px;overflow:hidden;background:#f2f4f8;border:1px solid #e5e9f2;display:flex;align-items:center;justify-content:center;">
         ${
           hasPhoto
-            ? `<img src="cid:profile-photo" alt="Profile" style="width:100%;height:100%;object-fit:cover;" />`
+            ? `<img src="${photoUrl || "cid:profile-photo"}" alt="Profile" style="width:100%;height:100%;object-fit:cover;" />`
             : `<div style="font-size:34px;font-weight:900;color:#4b5565;">${(userProfile.name || "C").slice(0, 1).toUpperCase()}</div>`
         }
       </div>
@@ -488,7 +489,13 @@ async function sendEmployerEmail({ job, userProfile }) {
   const attachments = [];
   if (userProfile.photoPath) {
     const buf = await getFileAsBuffer(userProfile.photoPath);
-    attachments.push({ filename: "profile.jpg", content: buf, cid: "profile-photo" });
+    attachments.push({
+      filename: "profile.jpg",
+      content: buf,
+      cid: "profile-photo",
+      contentType: "image/jpeg",
+      contentDisposition: "inline"
+    });
   }
   if (userProfile.cvPath) {
     const buf = await getFileAsBuffer(userProfile.cvPath);

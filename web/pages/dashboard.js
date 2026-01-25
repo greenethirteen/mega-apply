@@ -48,6 +48,7 @@ export default function Dashboard() {
   const [isEditing, setIsEditing] = useState(false);
   const [isProfileLoading, setIsProfileLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isAutoApplying, setIsAutoApplying] = useState(false);
   const [exploreCategory, setExploreCategory] = useState("");
 
   useEffect(() => {
@@ -198,18 +199,36 @@ export default function Dashboard() {
       setStatus("Please select up to two categories.");
       return;
     }
+    setIsAutoApplying(true);
     setStatus("Auto apply enabled.");
-    trackEvent("auto_apply_enabled", { categories: profile.categories });
-    await update(ref(db, `users/${user.uid}`), {
-      categories: profile.categories,
-      autoApplyEnabled: true,
-      lastAutoApply: 0
-    });
-    const base = process.env.NEXT_PUBLIC_FUNCTIONS_BASE_URL || "";
-    if (base) {
-      try {
-        await fetch(`${base}/runAutoApplyNow?userId=${user.uid}`);
-      } catch {}
+    try {
+      trackEvent("auto_apply_enabled", { categories: profile.categories });
+      await update(ref(db, `users/${user.uid}`), {
+        categories: profile.categories,
+        autoApplyEnabled: true,
+        lastAutoApply: 0
+      });
+      const base = process.env.NEXT_PUBLIC_FUNCTIONS_BASE_URL || "";
+      if (base) {
+        try {
+          await fetch(`${base}/runAutoApplyNow?userId=${user.uid}`);
+        } catch {}
+      }
+    } finally {
+      setIsAutoApplying(false);
+    }
+  }
+
+  async function pauseAutoApply() {
+    if (!user || !db) return;
+    setIsAutoApplying(true);
+    setStatus("Auto apply paused.");
+    try {
+      await update(ref(db, `users/${user.uid}`), {
+        autoApplyEnabled: false
+      });
+    } finally {
+      setIsAutoApplying(false);
     }
   }
 
@@ -304,9 +323,29 @@ export default function Dashboard() {
             ))}
           </div>
           <div className="actions" style={{ marginTop: 20 }}>
-            <button className="btn" onClick={startAutoApply}>Start Auto Apply</button>
+            <button
+              className={`btn pressable ${isAutoApplying ? "loading" : ""}`}
+              onClick={startAutoApply}
+              disabled={isAutoApplying}
+            >
+              {isAutoApplying ? "Starting..." : "Start Auto Apply"}
+            </button>
+            <button
+              className="btn ghost pressable"
+              type="button"
+              onClick={pauseAutoApply}
+              disabled={isAutoApplying || !profile.autoApplyEnabled}
+              title={profile.autoApplyEnabled ? "Pause daily emails" : "Auto apply is already paused"}
+            >
+              Pause
+            </button>
             <span className="tag">{profile.autoApplyEnabled ? "Auto apply is ON" : "Auto apply is OFF"}</span>
           </div>
+          {isAutoApplying && (
+            <div className="loading-bar compact" aria-hidden="true">
+              <span />
+            </div>
+          )}
           <p className="notice">We will email employers your profile + CV and send you daily summaries.</p>
 
           <div style={{ marginTop: 20 }}>
