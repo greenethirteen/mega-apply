@@ -20,6 +20,122 @@ const MIN_DESCRIPTION_LEN = parseInt(process.env.MIN_DESCRIPTION_LEN || "120", 1
 
 const BRAND = "MegaApply™";
 const FOOTER = "Powered by So Jobless Inc.";
+const CATEGORIES = [
+  "Civil",
+  "Mechanical",
+  "Electrical",
+  "HSE",
+  "QAQC",
+  "Project Management",
+  "Planning",
+  "Estimation",
+  "Procurement/Logistics"
+];
+
+const LOCATION_WORDS = new Set([
+  "saudi", "arabia", "ksa", "riyadh", "jeddah", "dammam", "jubail",
+  "khobar", "alkhobar", "al-khobar", "makkah", "mecca", "medina",
+  "tabuk", "abha", "jazan", "najran", "hail", "hofuf", "al-kharj"
+]);
+
+const VAGUE_PATTERNS = [
+  /urgent\s*requirement/i,
+  /urgent\s*hiring/i,
+  /multiple\s*positions?/i,
+  /various\s*roles?/i,
+  /manpower\s*requirement/i,
+  /positions?\s*available/i,
+  /we\s*are\s*hiring/i,
+  /hiring\s*now/i,
+  /our\s*company\s*needs/i,
+  /job\s*vacanc(?:y|ies)/i,
+  /job\s*title/i,
+  /vacanc(?:y|ies)\s*open/i
+];
+
+function toTitleCase(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/(^|[\s\-_/])(\w)/g, (_, a, b) => a + b.toUpperCase())
+    .trim();
+}
+
+function preserveAcronyms(s) {
+  let out = String(s || "");
+  out = out.replace(/\bqa\/?qc\b/gi, "QA/QC");
+  out = out.replace(/\bqaqc\b/gi, "QA/QC");
+  out = out.replace(/\bqa\b/gi, "QA");
+  out = out.replace(/\bqc\b/gi, "QC");
+  out = out.replace(/\bqs\b/gi, "QS");
+  return out;
+}
+
+function stripLocationSuffix(s) {
+  return String(s || "")
+    .replace(/\s*[-–,]\s*(riyadh|jeddah|dammam|jubail|ksa|saudi arabia|saudi)\b.*$/i, "")
+    .trim();
+}
+
+function isLocationOnly(s) {
+  const tokens = String(s || "").toLowerCase().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return true;
+  return tokens.every((t) => LOCATION_WORDS.has(t.replace(/[^a-z\-]/g, "")));
+}
+
+function isVagueTitle(s) {
+  const t = String(s || "").trim();
+  if (!t || t.length < 4) return true;
+  if (isLocationOnly(t)) return true;
+  return VAGUE_PATTERNS.some((re) => re.test(t));
+}
+
+function cleanJobTitleStrict(raw) {
+  let s = cleanTitleBasic(raw || "");
+  s = s.replace(/\b(urgent|requirement|requirements|hiring|needed|vacancy|vacancies)\b/gi, "");
+  s = s.replace(/\s{2,}/g, " ").trim();
+  s = stripLocationSuffix(s);
+  s = toTitleCase(s);
+  s = preserveAcronyms(s);
+  return s;
+}
+
+function extractRoleFromText(text) {
+  if (!text) return "";
+  const lines = String(text).split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  const patterns = [
+    /^(?:position|job\s*title|role)\s*[:\-]\s*(.+)$/i,
+    /^(?:hiring|wanted|required|we are hiring|we are looking for|seeking)\s*[:\-]?\s*(.+)$/i,
+    /(?:looking for|seeking)\s+(?:an|a)\s+([A-Za-z0-9 /&\-()]+)\b/i
+  ];
+  for (const line of lines) {
+    for (const re of patterns) {
+      const m = line.match(re);
+      if (m && m[1]) {
+        const candidate = cleanJobTitleStrict(m[1]);
+        if (!isVagueTitle(candidate)) return candidate;
+      }
+    }
+  }
+  return "";
+}
+
+function normalizeCategory(raw) {
+  if (!raw) return "";
+  const s = String(raw).trim();
+  const lower = s.toLowerCase();
+  if (lower === "qa/qc" || lower === "qaqc" || lower.includes("quality")) return "QAQC";
+  if (lower.includes("procurement") || lower.includes("logistics") || lower.includes("supply")) {
+    return "Procurement/Logistics";
+  }
+  if (lower.includes("project") || lower.includes("pm")) return "Project Management";
+  if (lower.includes("estimation") || lower.includes("cost")) return "Estimation";
+  if (lower.includes("planning")) return "Planning";
+  if (lower.includes("electrical")) return "Electrical";
+  if (lower.includes("mechanical")) return "Mechanical";
+  if (lower.includes("civil")) return "Civil";
+  if (lower.includes("hse") || lower.includes("safety")) return "HSE";
+  return CATEGORIES.includes(s) ? s : "";
+}
 
 function mailer() {
   const host = SMTP_HOST.value();
@@ -46,6 +162,47 @@ function centeredEmailTemplate({ heading, subheading, contentHtml, footer }) {
       <h2 style="margin:0 0 10px;font-size:22px;color:#1f1a17;">${heading}</h2>
       <div style="font-size:14px;color:#6b5f58;line-height:1.6;margin:12px 0 22px;">${contentHtml}</div>
       <div style="margin-top:22px;padding-top:14px;border-top:1px dashed #eadfd4;color:#9b8b81;font-size:12px;">${footer}</div>
+    </div>
+  </div>`;
+}
+
+function employerEmailTemplate({ contentHtml, footer, headerTitle }) {
+  return `
+  <div style="background:#f5f6fb;padding:34px 0;font-family:Arial,sans-serif;">
+    <div style="max-width:680px;margin:0 auto;background:#ffffff;border-radius:22px;border:1px solid #e5e9f2;overflow:hidden;">
+      <div style="padding:26px 28px;background:linear-gradient(135deg,#ffe3b1 0%,#ffd1dc 45%,#c7d7ff 100%);color:#1f2333;text-align:center;">
+        <div style="font-size:12px;font-weight:700;letter-spacing:.25em;text-transform:uppercase;opacity:.85;">Candidate Submission</div>
+        <div style="margin-top:10px;font-size:28px;font-weight:900;letter-spacing:.3px;">${headerTitle || "Job Application"}</div>
+        <div style="margin-top:6px;font-size:14px;font-weight:700;">Ready for immediate review</div>
+      </div>
+      <div style="padding:26px 28px;background:#ffffff;color:#1f2333;text-align:center;">
+        ${contentHtml}
+        <div style="margin-top:24px;padding-top:14px;border-top:1px solid #e9edf5;color:#8b95ad;font-size:12px;text-align:center;">
+          ${footer}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function dailyEmailTemplate({ heading, subheading, contentHtml, footer }) {
+  return `
+  <div style="background:#f5f6fb;padding:34px 0;font-family:Arial,sans-serif;">
+    <div style="max-width:680px;margin:0 auto;background:#ffffff;border-radius:22px;border:1px solid #e5e9f2;overflow:hidden;">
+      <div style="padding:26px 28px;background:linear-gradient(135deg,#ffe3b1 0%,#ffd1dc 45%,#c7d7ff 100%);color:#1f2333;text-align:center;">
+        <div style="display:flex;justify-content:center;gap:10px;align-items:center;margin-bottom:6px;">
+          <span style="width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#8fb3ff,#7b61ff,#a6c1ff);display:inline-block;border:1px solid rgba(0,0,0,0.05);"></span>
+          <span style="font-size:16px;font-weight:800;letter-spacing:.2px;color:#1f2333;">MegaApply<span style="font-size:12px;vertical-align:top;">™</span></span>
+        </div>
+        <div style="margin-top:10px;font-size:28px;font-weight:900;letter-spacing:.3px;">${heading}</div>
+        <div style="margin-top:6px;font-size:14px;font-weight:700;">${subheading || "Daily Summary"}</div>
+      </div>
+      <div style="padding:26px 28px;background:#ffffff;color:#1f2333;text-align:center;">
+        ${contentHtml}
+        <div style="margin-top:24px;padding-top:14px;border-top:1px solid #e9edf5;color:#8b95ad;font-size:12px;text-align:center;">
+          ${footer}
+        </div>
+      </div>
     </div>
   </div>`;
 }
@@ -149,9 +306,9 @@ const CATEGORY_RULES = [
   { cat: "Electrical", re: /(electrical|\belv\b|low\s*current|substation|mv\b|lv\b|transformer|protection\s*relay|switchgear|power\s*system|panel\s*board)/i },
   { cat: "Planning", re: /(planning|scheduler|primavera|\bp6\b|project\s*controls)/i },
   { cat: "Estimation", re: /(estimator|estimation|tender|bid|boq\b|cost\s*(control|engineer)|pricing)/i },
+  { cat: "QAQC", re: /(qa\/?qc|\bqa\b|\bqc\b|quality\s*(assurance|control|engineer)|quality\s*inspector|inspection\b|inspector\b|welding\s*inspection|ndt\b|coating\s*inspection|iso\s*9001)/i },
   { cat: "HSE", re: /(\bhse\b|\bohs\b|safety\b|nebosh|osha\b|iosh\b|permit\s*to\s*work|ptw)/i },
-  { cat: "QAQC", re: /(\bqa\b|\bqc\b|quality\s*(assurance|control)|welding\s*inspection|ndt\b|coating\s*inspection)/i },
-  { cat: "Project Management", re: /(project\s*(manager|engineer|coordinator)|\bpm\b(?![a-z])|epc\b|lead\s*engineer|site\s*(manager|engineer))/i },
+  { cat: "Project Management", re: /(project\s*(manager|engineer|coordinator)|\bpm\b(?![a-z])|epc\b|lead\s*engineer|site\s*(manager|engineer)|document\s*controller|doc\s*controller|document\s*control)/i },
   { cat: "Procurement/Logistics", re: /(procure|buyer|purchas|expedit|vendor\s*dev|supply\s*chain|material\s*controller?|warehouse|store\s*keeper|storeman|logistics|inventory|material\s*handling)/i },
   { cat: "Project Management", re: /./i }
 ];
@@ -167,6 +324,7 @@ function chooseCategory(title, desc = "") {
 async function enhanceWithOpenAI({ title, description }) {
   const apiKey = OPENAI_API_KEY.value();
   if (!apiKey) throw new Error("OPENAI_API_KEY missing");
+  const categoryList = CATEGORIES.join(", ");
   const payload = {
     model: OPENAI_MODEL,
     temperature: 0.2,
@@ -174,7 +332,10 @@ async function enhanceWithOpenAI({ title, description }) {
       {
         role: "system",
         content:
-          "You clean and improve scraped job data. Fix typos/casing. Do not invent facts. Return strict JSON with keys: title, description."
+          "You clean and improve scraped job data. Fix typos/casing. Do not invent facts. " +
+          `Assign one category from this exact list: ${categoryList}. ` +
+          "Title must be only the job role (no locations, no urgency words, no company names). " +
+          "Return strict JSON with keys: title, description, category."
       },
       {
         role: "user",
@@ -203,9 +364,12 @@ async function enhanceWithOpenAI({ title, description }) {
   } catch {
     parsed = {};
   }
+  const rawCategory = typeof parsed.category === "string" ? parsed.category.trim() : "";
+  const category = normalizeCategory(rawCategory);
   return {
     title: cleanTitleBasic(parsed.title || title),
-    description: String(parsed.description || description || "").trim()
+    description: String(parsed.description || description || "").trim(),
+    category
   };
 }
 
@@ -246,8 +410,16 @@ export const scrapeSaudiJobsDaily = onSchedule(
           description: rawDesc
         });
         const desc = ai.description.length >= MIN_DESCRIPTION_LEN ? ai.description : rawDesc;
-        const finalTitle = cleanTitleBasic(ai.title || rawTitle);
-        const category = chooseCategory(finalTitle, desc);
+        let finalTitle = cleanJobTitleStrict(ai.title || rawTitle);
+        if (isVagueTitle(finalTitle)) {
+          const extracted = extractRoleFromText(desc) || extractRoleFromText(rawDesc);
+          finalTitle = extracted || finalTitle;
+        }
+        if (isVagueTitle(finalTitle)) {
+          finalTitle = cleanJobTitleStrict(rawTitle) || "General Engineering Role";
+        }
+        const aiCategory = normalizeCategory(ai.category);
+        const category = aiCategory || chooseCategory(finalTitle, desc);
         await db.ref(`jobs/${jobId}`).set({
           title: finalTitle,
           description: desc,
@@ -273,36 +445,67 @@ async function sendEmployerEmail({ job, userProfile }) {
   if (!job.email) return false;
   const transporter = mailer();
 
+  const hasPhoto = Boolean(userProfile.photoPath);
+  const cvLink = userProfile.cvUrl || "";
+  const jobLink = job.url || "";
+  const displayJobTitle = preserveAcronyms(job.title || "");
   const contentHtml = `
-    <p><strong>Candidate:</strong> ${userProfile.name || ""}</p>
-    <p><strong>Role Title:</strong> ${userProfile.title || ""}</p>
-    <p><strong>Bio:</strong> ${userProfile.bio || ""}</p>
-    <p><strong>Job:</strong> ${job.title}</p>
-    <p><strong>Location:</strong> ${job.location}</p>
-    <p><strong>Job Link:</strong> <a href="${job.url}">${job.url}</a></p>
+    <div style="display:flex;gap:18px;align-items:center;justify-content:center;flex-wrap:wrap;">
+      <div style="width:96px;height:96px;border-radius:20px;overflow:hidden;background:#f2f4f8;border:1px solid #e5e9f2;display:flex;align-items:center;justify-content:center;">
+        ${
+          hasPhoto
+            ? `<img src="cid:profile-photo" alt="Profile" style="width:100%;height:100%;object-fit:cover;" />`
+            : `<div style="font-size:34px;font-weight:900;color:#4b5565;">${(userProfile.name || "C").slice(0, 1).toUpperCase()}</div>`
+        }
+      </div>
+      <div style="text-align:center;">
+        <div style="font-size:26px;font-weight:900;color:#1f2333;letter-spacing:.2px;">${userProfile.name || "Candidate"}</div>
+        <div style="font-size:15px;color:#5d667b;margin-top:4px;font-weight:700;">${userProfile.title || "Role Title"}</div>
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center;">
+          <span style="padding:6px 10px;border-radius:999px;background:#eef2ff;border:1px solid #d7def3;color:#55607a;font-size:12px;">Applied for</span>
+          <span style="padding:6px 10px;border-radius:999px;background:#ffd9a0;color:#3a2600;font-size:12px;font-weight:800;">${displayJobTitle || "Job"}</span>
+          ${job.location ? `<span style="padding:6px 10px;border-radius:999px;background:#b8c9ff;color:#18203a;font-size:12px;font-weight:800;">${job.location}</span>` : ""}
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:18px;padding:18px;border-radius:16px;background:#f9fafc;border:1px solid #e9edf5;text-align:center;">
+      <div style="font-size:12px;color:#8b95ad;text-transform:uppercase;letter-spacing:.4px;">Professional Summary</div>
+      <div style="margin-top:8px;color:#1f2333;line-height:1.7;font-size:15px;">${userProfile.bio || "No summary provided."}</div>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:12px;flex-wrap:wrap;justify-content:center;">
+      ${
+        cvLink
+          ? `<a href="${cvLink}" style="display:inline-block;padding:14px 18px;border-radius:999px;background:linear-gradient(135deg,#ffcc7a,#ff9ab3);color:#3a2600;text-decoration:none;font-weight:900;letter-spacing:.2px;">View CV (PDF)</a>`
+          : `<span style="display:inline-block;padding:14px 18px;border-radius:999px;background:#eef1f6;color:#7a8498;">CV not provided</span>`
+      }
+    </div>
+    <div style="margin-top:14px;display:flex;justify-content:center;gap:12px;flex-wrap:wrap;color:#7e89a3;font-size:12px;">
+      <div>Availability: Immediate</div>
+      <div>Attachments: CV ${userProfile.cvPath ? "✓" : "—"} · Photo ${userProfile.photoPath ? "✓" : "—"}</div>
+    </div>
   `;
 
   const attachments = [];
   if (userProfile.photoPath) {
     const buf = await getFileAsBuffer(userProfile.photoPath);
-    attachments.push({ filename: "profile.jpg", content: buf });
+    attachments.push({ filename: "profile.jpg", content: buf, cid: "profile-photo" });
   }
   if (userProfile.cvPath) {
     const buf = await getFileAsBuffer(userProfile.cvPath);
     attachments.push({ filename: "cv.pdf", content: buf });
   }
 
-  const html = centeredEmailTemplate({
-    heading: "New Application via MegaApply™",
-    subheading: "Auto Apply Submission",
+  const footer = `Powered by So Jobless Inc. · <a href="https://www.sojobless.live" style="color:#8b95ad;text-decoration:none;">www.sojobless.live</a> · <a href="https://instagram.com/sojobless.bh" style="color:#8b95ad;text-decoration:none;">instagram.com/sojobless.bh</a>`;
+  const html = employerEmailTemplate({
     contentHtml,
-    footer: FOOTER
+    footer,
+    headerTitle: displayJobTitle ? `${displayJobTitle} Vacancy` : "Job Vacancy"
   });
 
   await transporter.sendMail({
     from: MAIL_FROM.value() || userProfile.email,
     to: job.email,
-    subject: `Application: ${userProfile.title || "Candidate"} for ${job.title}`,
+    subject: `${userProfile.name || "Candidate"}: Application for ${displayJobTitle ? `${displayJobTitle} Vacancy` : "Job Vacancy"}`,
     html,
     attachments
   });
@@ -318,21 +521,53 @@ function summarizeJobsByCategory(jobs) {
   return counts;
 }
 
-async function sendUserSummaryEmail({ userProfile, jobs }) {
+function formatCategoryList(byCat) {
+  return Object.entries(byCat)
+    .map(
+      ([cat, count]) =>
+        `<div style="display:flex;justify-content:space-between;gap:12px;padding:8px 12px;border:1px solid #eadfd4;border-radius:12px;margin:6px 0;background:#fff;">` +
+        `<span style="font-weight:600;color:#1f1a17;">${cat}</span>` +
+        `<span style="color:#f05a28;font-weight:700;">${count}</span>` +
+        `</div>`
+    )
+    .join("");
+}
+
+async function sendUserSummaryEmail({ userProfile, jobs, lifetimeTotal = 0 }) {
   if (!userProfile.email) return;
   const transporter = mailer();
   const total = jobs.length;
   const byCat = summarizeJobsByCategory(jobs);
-  const listHtml = Object.entries(byCat)
-    .map(([cat, count]) => `<div style="margin:4px 0;"><strong>${cat}:</strong> ${count}</div>`)
-    .join("");
+  const listHtml = formatCategoryList(byCat);
+  const photoUrl = userProfile.photoUrl || "";
 
   const contentHtml = `
-    <p>Today we auto‑applied to <strong>${total}</strong> jobs for you.</p>
-    <div style="display:inline-block;text-align:left;">${listHtml}</div>
+    <div style="display:flex;gap:18px;align-items:center;justify-content:center;flex-wrap:wrap;">
+      <div style="width:96px;height:96px;border-radius:20px;overflow:hidden;background:#f2f4f8;border:1px solid #e5e9f2;display:flex;align-items:center;justify-content:center;">
+        ${
+          photoUrl
+            ? `<img src="${photoUrl}" alt="Profile" style="width:100%;height:100%;object-fit:cover;" />`
+            : `<div style="font-size:34px;font-weight:900;color:#4b5565;">${(userProfile.name || "U").slice(0, 1).toUpperCase()}</div>`
+        }
+      </div>
+      <div style="text-align:center;">
+        <div style="font-size:22px;font-weight:900;color:#1f2333;letter-spacing:.2px;">${userProfile.name || "Your Profile"}</div>
+        <div style="font-size:14px;color:#5d667b;margin-top:4px;font-weight:700;">${userProfile.title || "Job Seeker"}</div>
+        <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">
+          <span style="padding:8px 12px;border-radius:999px;background:#eef2ff;border:1px solid #d7def3;color:#55607a;font-size:13px;font-weight:700;letter-spacing:.2px;">Daily total</span>
+          <span style="padding:10px 16px;border-radius:999px;background:#ffd9a0;color:#3a2600;font-size:16px;font-weight:900;letter-spacing:.2px;">${total} applications</span>
+          <span style="padding:10px 16px;border-radius:999px;background:#b8c9ff;color:#18203a;font-size:16px;font-weight:900;letter-spacing:.2px;">Lifetime ${lifetimeTotal}</span>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:18px;padding:18px;border-radius:16px;background:#f9fafc;border:1px solid #e9edf5;text-align:center;">
+      <div style="font-size:12px;color:#8b95ad;text-transform:uppercase;letter-spacing:.4px;">Applied by Category</div>
+      <div style="margin-top:8px;display:inline-block;text-align:left;width:100%;">${listHtml}</div>
+    </div>
+    <div style="margin-top:14px;color:#7e89a3;font-size:12px;">We keep applying daily to new matches in your top 2 categories.</div>
   `;
 
-  const html = centeredEmailTemplate({
+  const html = dailyEmailTemplate({
     heading: "Daily Auto Apply Summary",
     subheading: "Your MegaApply™ Report",
     contentHtml,
@@ -343,6 +578,57 @@ async function sendUserSummaryEmail({ userProfile, jobs }) {
     from: MAIL_FROM.value() || "no-reply@megaapply.com",
     to: userProfile.email,
     subject: `MegaApply™ Daily Summary - ${total} applications`,
+    html
+  });
+}
+
+async function sendUserFirstEmail({ userProfile, jobs }) {
+  if (!userProfile.email) return;
+  const transporter = mailer();
+  const total = jobs.length;
+  const byCat = summarizeJobsByCategory(jobs);
+  const listHtml = formatCategoryList(byCat);
+  const photoUrl = userProfile.photoUrl || "";
+
+  const contentHtml = `
+    <div style="display:flex;gap:18px;align-items:center;justify-content:center;flex-wrap:wrap;">
+      <div style="width:96px;height:96px;border-radius:20px;overflow:hidden;background:#f2f4f8;border:1px solid #e5e9f2;display:flex;align-items:center;justify-content:center;">
+        ${
+          photoUrl
+            ? `<img src="${photoUrl}" alt="Profile" style="width:100%;height:100%;object-fit:cover;" />`
+            : `<div style="font-size:34px;font-weight:900;color:#4b5565;">${(userProfile.name || "U").slice(0, 1).toUpperCase()}</div>`
+        }
+      </div>
+      <div style="text-align:center;">
+        <div style="font-size:22px;font-weight:900;color:#1f2333;letter-spacing:.2px;">${userProfile.name || "Your Profile"}</div>
+        <div style="font-size:14px;color:#5d667b;margin-top:4px;font-weight:700;">${userProfile.title || "Job Seeker"}</div>
+        <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">
+          <span style="padding:8px 12px;border-radius:999px;background:#eef2ff;border:1px solid #d7def3;color:#55607a;font-size:13px;font-weight:700;letter-spacing:.2px;">First run</span>
+          <span style="padding:10px 16px;border-radius:999px;background:#ffd9a0;color:#3a2600;font-size:16px;font-weight:900;letter-spacing:.2px;">${total} applications</span>
+          <span style="padding:10px 16px;border-radius:999px;background:#b8c9ff;color:#18203a;font-size:16px;font-weight:900;letter-spacing:.2px;">${Object.keys(byCat).length} categories</span>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:18px;padding:18px;border-radius:16px;background:#f9fafc;border:1px solid #e9edf5;text-align:center;">
+      <div style="font-size:12px;color:#8b95ad;text-transform:uppercase;letter-spacing:.4px;">Applied by Category</div>
+      <div style="margin-top:8px;display:inline-block;text-align:left;width:100%;">${listHtml}</div>
+    </div>
+    <div style="margin-top:14px;color:#7e89a3;font-size:12px;">
+      Welcome to MegaApply™. We emailed employers your profile and CV and will keep applying daily.
+    </div>
+  `;
+
+  const html = dailyEmailTemplate({
+    heading: "Your First Auto-Apply Run Is Complete",
+    subheading: "Welcome to MegaApply™",
+    contentHtml,
+    footer: FOOTER
+  });
+
+  await transporter.sendMail({
+    from: MAIL_FROM.value() || "no-reply@megaapply.com",
+    to: userProfile.email,
+    subject: `Welcome to MegaApply™ — ${total} applications sent`,
     html
   });
 }
@@ -372,6 +658,12 @@ async function alreadyApplied(userId, jobId) {
   return snap.exists();
 }
 
+async function getApplicationsCount(userId) {
+  const snap = await db.ref(`applications/${userId}`).once("value");
+  if (!snap.exists()) return 0;
+  return snap.numChildren();
+}
+
 async function runAutoApplyForUser(user) {
   if (!user.autoApplyEnabled || !user.categories || !user.categories.length) return [];
   const last = user.lastAutoApply || 0;
@@ -396,7 +688,11 @@ async function runAutoApplyForUser(user) {
 
   await db.ref(`users/${user.id}/lastAutoApply`).set(Date.now());
   if (appliedJobs.length) {
-    await sendUserSummaryEmail({ userProfile: user, jobs: appliedJobs });
+    const lifetimeTotal = await getApplicationsCount(user.id);
+    if (last === 0) {
+      await sendUserFirstEmail({ userProfile: user, jobs: appliedJobs });
+    }
+    await sendUserSummaryEmail({ userProfile: user, jobs: appliedJobs, lifetimeTotal });
   }
   return appliedJobs;
 }

@@ -18,6 +18,7 @@ import {
 } from "firebase/storage";
 import { getFirebaseAuth, getFirebaseDb, getFirebaseStorage } from "../lib/firebaseClient.js";
 import { CATEGORIES } from "../lib/categories.js";
+import { trackEvent } from "../lib/analytics.js";
 
 export default function Dashboard() {
   const router = useRouter();
@@ -43,6 +44,11 @@ export default function Dashboard() {
   const [jobCounts, setJobCounts] = useState({ total: 0, byCategory: {} });
   const [jobsById, setJobsById] = useState({});
   const [applications, setApplications] = useState([]);
+  const [hasSavedProfile, setHasSavedProfile] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isProfileLoading, setIsProfileLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [exploreCategory, setExploreCategory] = useState("");
 
   useEffect(() => {
     const a = getFirebaseAuth();
@@ -58,17 +64,27 @@ export default function Dashboard() {
         router.push("/");
         return;
       }
+      setIsProfileLoading(true);
       const snap = await get(ref(d, `users/${u.uid}`));
       if (snap.exists()) {
+        setHasSavedProfile(true);
+        setIsEditing(false);
         setProfile({
           ...profile,
           ...snap.val(),
           email: u.email || snap.val().email || ""
         });
       } else {
+        setHasSavedProfile(false);
+        setIsEditing(true);
         setProfile((p) => ({ ...p, email: u.email || "" }));
       }
+      setIsProfileLoading(false);
     });
+  }, []);
+
+  useEffect(() => {
+    trackEvent("page_view", { page: "dashboard" });
   }, []);
 
   useEffect(() => {
@@ -121,7 +137,7 @@ export default function Dashboard() {
     setProfile((p) => {
       const has = p.categories.includes(cat);
       const next = has ? p.categories.filter((c) => c !== cat) : [...p.categories, cat];
-      if (next.length > 2) return p;
+      if (next.length > 3) return p;
       return { ...p, categories: next };
     });
   }
@@ -138,6 +154,7 @@ export default function Dashboard() {
     e.preventDefault();
     if (!user || !db) return;
     setStatus("Saving...");
+    setIsSaving(true);
     try {
       let photoUrl = profile.photoUrl;
       let cvUrl = profile.cvUrl;
@@ -163,9 +180,15 @@ export default function Dashboard() {
       };
       await set(ref(db, `users/${user.uid}`), payload);
       setProfile(payload);
+      setHasSavedProfile(true);
+      setIsEditing(false);
+      setPhotoFile(null);
+      setCvFile(null);
       setStatus("Saved.");
     } catch (err) {
       setStatus(err.message || "Save failed");
+    } finally {
+      setIsSaving(false);
     }
   }
 
@@ -176,6 +199,7 @@ export default function Dashboard() {
       return;
     }
     setStatus("Auto apply enabled.");
+    trackEvent("auto_apply_enabled", { categories: profile.categories });
     await update(ref(db, `users/${user.uid}`), {
       categories: profile.categories,
       autoApplyEnabled: true,
@@ -189,6 +213,28 @@ export default function Dashboard() {
     }
   }
 
+  const selectedCount = profile.categories.reduce(
+    (sum, cat) => sum + (jobCounts.byCategory[cat] || 0),
+    0
+  );
+  const exploreJobs = useMemo(() => {
+    if (!exploreCategory) return [];
+    return Object.values(jobsById)
+      .filter((job) => job.category === exploreCategory)
+      .map((job) => ({ id: job.id, title: job.title }))
+      .filter((job) => job.title);
+  }, [exploreCategory, jobsById]);
+
+  function formatTitleDisplay(title) {
+    if (!title) return "";
+    return title
+      .replace(/\bqa\/?qc\b/gi, "QA/QC")
+      .replace(/\bqaqc\b/gi, "QA/QC")
+      .replace(/\bqa\b/gi, "QA")
+      .replace(/\bqc\b/gi, "QC")
+      .replace(/\bqs\b/gi, "QS");
+  }
+
   if (!user) {
     return (
       <div className="container">
@@ -197,24 +243,42 @@ export default function Dashboard() {
     );
   }
 
-  const selectedCount = profile.categories.reduce(
-    (sum, cat) => sum + (jobCounts.byCategory[cat] || 0),
-    0
-  );
-
   return (
     <div className="container">
       <div className="header">
-        <div className="brand">MegaApply<span>™</span> Dashboard</div>
+        <div className="logo" aria-label="MegaApply">
+          <div className="logo-holo" aria-hidden="true" />
+          <div className="logo-text">
+            <div className="name">MegaApply<span>™</span></div>
+            <div className="tagline">Auto Apply Engine</div>
+          </div>
+        </div>
         <div className="actions">
           <a className="tag" href="/">Home</a>
           {auth && <button className="btn secondary" onClick={() => signOut(auth)}>Sign out</button>}
         </div>
       </div>
 
+      <section className="dash-hero">
+        <div className="dash-orb one" />
+        <div className="dash-orb two" />
+        <div className="dash-orb three" />
+        <div className="dash-hero-content">
+          <p className="dash-kicker">
+            TARGET HIGHER‑PAYING <span>ENGINEERING</span> ROLES FASTER
+          </p>
+          <h1>Bulk Apply to 1,000+ Jobs in Saudi Arabia 🇸🇦</h1>
+          <div className="dash-tags">
+            <span className="tag">AI‑Cleaned Listings</span>
+            <span className="tag">Daily Auto‑Apply</span>
+            <span className="tag">Proof of Work Emails</span>
+          </div>
+        </div>
+      </section>
+
       <div className="split">
         <div className="card hero">
-          <h2>Select up to 2 categories</h2>
+          <h2>Select up to 3 categories</h2>
           <p className="notice">Choose your focus areas. We auto‑apply to every new job in your picks.</p>
           <div className="stats">
             <div className="stat">
@@ -267,42 +331,135 @@ export default function Dashboard() {
               })}
             </div>
           </div>
+
         </div>
 
-        <div className="card">
-          <h2>Your profile</h2>
-          <form onSubmit={saveProfile}>
-            <div className="grid">
-              <div className="col-6">
-                <label className="label">Full Name</label>
-                <input className="input" value={profile.name} onChange={(e) => setProfile({ ...profile, name: e.target.value })} />
-              </div>
-              <div className="col-6">
-                <label className="label">Email</label>
-                <input className="input" value={profile.email} disabled />
-              </div>
-              <div className="col-6">
-                <label className="label">Job Title</label>
-                <input className="input" value={profile.title} onChange={(e) => setProfile({ ...profile, title: e.target.value })} />
-              </div>
-              <div className="col-6">
-                <label className="label">Professional Photo</label>
-                <input className="input" type="file" accept="image/*" onChange={(e) => setPhotoFile(e.target.files?.[0] || null)} />
-              </div>
-              <div className="col-12">
-                <label className="label">About you</label>
-                <textarea className="textarea" value={profile.bio} onChange={(e) => setProfile({ ...profile, bio: e.target.value })} />
-              </div>
-              <div className="col-12">
-                <label className="label">CV (PDF)</label>
-                <input className="input" type="file" accept="application/pdf" onChange={(e) => setCvFile(e.target.files?.[0] || null)} />
-              </div>
+        <div className="stack">
+          <div className="card">
+            <div className="profile-header">
+              <h2>Your profile</h2>
+              {hasSavedProfile && !isEditing && (
+                <button className="btn ghost" type="button" onClick={() => setIsEditing(true)}>
+                  Edit Profile
+                </button>
+              )}
             </div>
-            <div className="actions" style={{ marginTop: 16 }}>
-              <button className="btn" type="submit">Save Profile</button>
-              {status && <span className="tag">{status}</span>}
+            {(isProfileLoading || isSaving) && (
+              <div className="loading-bar">
+                <span />
+              </div>
+            )}
+
+            {!isEditing && hasSavedProfile ? (
+              <div className="profile-view">
+                <div className="profile-hero">
+                  <div className="avatar">
+                    {profile.photoUrl ? (
+                      <img src={profile.photoUrl} alt="Profile photo" />
+                    ) : (
+                      <div className="avatar-fallback">{(profile.name || "U").slice(0, 1).toUpperCase()}</div>
+                    )}
+                  </div>
+                  <div className="profile-meta">
+                    <div className="profile-name">{profile.name || "Your name"}</div>
+                    <div className="profile-title">{profile.title || "Your job title"}</div>
+                    <div className="profile-email">{profile.email}</div>
+                  </div>
+                </div>
+                <div className="profile-body">
+                  <div>
+                    <div className="label">About you</div>
+                    <p className="profile-text">{profile.bio || "Add a short professional summary so employers understand your strengths."}</p>
+                  </div>
+                  <div className="profile-files">
+                    <div className="file-card">
+                      <span>CV</span>
+                      {profile.cvUrl ? (
+                        <a className="link" href={profile.cvUrl} target="_blank" rel="noreferrer">View PDF</a>
+                      ) : (
+                        <span className="notice">Not uploaded</span>
+                      )}
+                    </div>
+                    <div className="file-card">
+                      <span>Photo</span>
+                      {profile.photoUrl ? (
+                        <a className="link" href={profile.photoUrl} target="_blank" rel="noreferrer">Open</a>
+                      ) : (
+                        <span className="notice">Not uploaded</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={saveProfile}>
+                <div className="grid">
+                  <div className="col-6">
+                    <label className="label">Full Name</label>
+                    <input className="input" value={profile.name} onChange={(e) => setProfile({ ...profile, name: e.target.value })} />
+                  </div>
+                  <div className="col-6">
+                    <label className="label">Email</label>
+                    <input className="input" value={profile.email} disabled />
+                  </div>
+                  <div className="col-6">
+                    <label className="label">Job Title</label>
+                    <input className="input" value={profile.title} onChange={(e) => setProfile({ ...profile, title: e.target.value })} />
+                  </div>
+                  <div className="col-6">
+                    <label className="label">Professional Photo</label>
+                    <input className="input" type="file" accept="image/*" onChange={(e) => setPhotoFile(e.target.files?.[0] || null)} />
+                  </div>
+                  <div className="col-12">
+                    <label className="label">About you</label>
+                    <textarea className="textarea" value={profile.bio} onChange={(e) => setProfile({ ...profile, bio: e.target.value })} />
+                  </div>
+                  <div className="col-12">
+                    <label className="label">CV (PDF)</label>
+                    <input className="input" type="file" accept="application/pdf" onChange={(e) => setCvFile(e.target.files?.[0] || null)} />
+                  </div>
+                </div>
+                <div className="actions" style={{ marginTop: 16 }}>
+                  <button className="btn" type="submit">Save Profile</button>
+                  {hasSavedProfile && (
+                    <button className="btn ghost" type="button" onClick={() => setIsEditing(false)}>Cancel</button>
+                  )}
+                  {status && <span className="tag">{status}</span>}
+                </div>
+              </form>
+            )}
+
+          </div>
+
+          <div className="card">
+            <h3 style={{ marginBottom: 6 }}>Explore jobs</h3>
+            <p className="notice">Pick a category to browse titles.</p>
+            <div className="actions" style={{ marginTop: 10 }}>
+              <select
+                className="select"
+                value={exploreCategory}
+                onChange={(e) => setExploreCategory(e.target.value)}
+              >
+                <option value="">Select category</option>
+                {categoryOptions.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat} ({jobCounts.byCategory[cat] || 0})
+                  </option>
+                ))}
+              </select>
             </div>
-          </form>
+            <div className="scroll" style={{ marginTop: 12 }}>
+              {!exploreCategory && <div className="notice">Choose a category to see jobs.</div>}
+              {exploreCategory && exploreJobs.length === 0 && (
+                <div className="notice">No jobs found for this category.</div>
+              )}
+            {exploreJobs.map((job) => (
+              <div className="job-row" key={job.id}>
+                <div className="job-title">{formatTitleDisplay(job.title)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
         </div>
       </div>
     </div>

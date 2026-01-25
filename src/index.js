@@ -13,6 +13,17 @@ const ENABLE_EMAIL_EXTRACTION = (process.env.ENABLE_EMAIL_EXTRACTION ?? '1') !==
 const DUMP_HTML = (process.env.DUMP_HTML ?? '0') !== '0';
 const FIREBASE_DISABLED = (process.env.FIREBASE_DISABLED ?? '0') !== '0'; // default to enabled
 const MIN_DESCRIPTION_LEN = parseInt(process.env.MIN_DESCRIPTION_LEN || '120', 10);
+const CATEGORIES = new Set([
+  "Civil",
+  "Mechanical",
+  "Electrical",
+  "HSE",
+  "QAQC",
+  "Project Management",
+  "Planning",
+  "Estimation",
+  "Procurement/Logistics"
+]);
 
 // Simple pause
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
@@ -313,7 +324,10 @@ export async function run() {
         const enhanced = await enhanceJobRecord(rec);
         const finalTitle = enhanced.title ?? rec.title;
         const finalDesc = enhanced.description ?? rec.description;
-        const category = chooseCategory(finalTitle, finalDesc);
+        const aiCategory = typeof enhanced.category === 'string' && CATEGORIES.has(enhanced.category)
+          ? enhanced.category
+          : null;
+        const category = aiCategory || chooseCategory(finalTitle, finalDesc);
         const row = normalizeJobRecord({ ...rec, ...enhanced, category });
         wrote(row);
         await writeRow(row);

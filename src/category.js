@@ -19,11 +19,11 @@ const RULES = [
   { cat: "Estimation", re: /(estimator|estimation|tender|bid|boq\b|cost\s*(control|engineer)|pricing)/i },
 
   // QA/Safety
+  { cat: "QAQC", re: /(qa\/?qc|\bqa\b|\bqc\b|quality\s*(assurance|control|engineer)|quality\s*inspector|inspection\b|inspector\b|welding\s*inspection|ndt\b|coating\s*inspection|iso\s*9001)/i },
   { cat: "HSE", re: /(\bhse\b|\bohs\b|safety\b|nebosh|osha\b|iosh\b|permit\s*to\s*work|ptw)/i },
-  { cat: "QAQC", re: /(\bqa\b|\bqc\b|quality\s*(assurance|control)|welding\s*inspection|ndt\b|coating\s*inspection)/i },
 
   // PM / Leadership
-  { cat: "Project Management", re: /(project\s*(manager|engineer|coordinator)|\bpm\b(?![a-z])|epc\b|lead\s*engineer|site\s*(manager|engineer))/i },
+  { cat: "Project Management", re: /(project\s*(manager|engineer|coordinator)|\bpm\b(?![a-z])|epc\b|lead\s*engineer|site\s*(manager|engineer)|document\s*controller|doc\s*controller|document\s*control)/i },
 
   // Commercial & supply
   { cat: "Procurement/Logistics", re: /(procure|buyer|purchas|expedit|vendor\s*dev|supply\s*chain|material\s*controller?|warehouse|store\s*keeper|storeman|logistics|inventory|material\s*handling)/i },
