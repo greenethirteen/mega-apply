@@ -243,6 +243,13 @@ export default function Dashboard() {
       .map((job) => ({ id: job.id, title: job.title }))
       .filter((job) => job.title);
   }, [exploreCategory, jobsById]);
+  const applicationsToday = useMemo(() => {
+    if (!applications.length) return 0;
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const startMs = start.getTime();
+    return applications.filter((app) => (app.appliedAt || 0) >= startMs).length;
+  }, [applications]);
 
   function formatTitleDisplay(title) {
     if (!title) return "";
@@ -350,7 +357,7 @@ export default function Dashboard() {
 
           <div style={{ marginTop: 20 }}>
             <h3 style={{ marginBottom: 6 }}>Auto applied jobs</h3>
-            <p className="notice">Total applications: {applications.length}</p>
+            <p className="notice">Total applications: {applications.length} · Sent today: {applicationsToday}</p>
             <div className="scroll">
               {applications.length === 0 && (
                 <div className="notice">No applications yet.</div>

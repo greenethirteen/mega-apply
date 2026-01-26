@@ -153,58 +153,98 @@ function mailer() {
   });
 }
 
+function extractEmailAddress(raw) {
+  if (!raw) return "";
+  const str = String(raw).trim();
+  const match = str.match(/<([^>]+)>/);
+  if (match && match[1]) return match[1].trim();
+  if (str.includes("@")) return str;
+  return "";
+}
+
+function buildFrom(name, fallbackEmail) {
+  const email = extractEmailAddress(MAIL_FROM.value()) || fallbackEmail || "no-reply@megaapply.com";
+  return `${name} <${email}>`;
+}
+
 function centeredEmailTemplate({ heading, subheading, contentHtml, footer }) {
   return `
-  <div style="background:#f6f2ee;padding:30px 0;font-family:Arial,sans-serif;">
-    <div style="max-width:620px;margin:0 auto;background:#fff8f1;border-radius:20px;padding:32px;text-align:center;border:1px solid #eadfd4;">
-      <div style="font-size:28px;font-weight:800;letter-spacing:.3px;color:#1f1a17;margin-bottom:6px;">${BRAND}</div>
-      <div style="color:#f05a28;font-weight:700;font-size:16px;margin-bottom:22px;">${subheading || "Auto Apply Summary"}</div>
-      <h2 style="margin:0 0 10px;font-size:22px;color:#1f1a17;">${heading}</h2>
-      <div style="font-size:14px;color:#6b5f58;line-height:1.6;margin:12px 0 22px;">${contentHtml}</div>
-      <div style="margin-top:22px;padding-top:14px;border-top:1px dashed #eadfd4;color:#9b8b81;font-size:12px;">${footer}</div>
-    </div>
-  </div>`;
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f6f2ee;margin:0;padding:0;font-family:Arial,sans-serif;">
+    <tr>
+      <td align="center" style="padding:24px 12px;">
+        <table role="presentation" width="620" cellspacing="0" cellpadding="0" style="width:100%;max-width:620px;background:#fff8f1;border-radius:20px;border:1px solid #eadfd4;">
+          <tr>
+            <td align="center" style="padding:28px 24px 18px;">
+              <div style="font-size:28px;font-weight:800;letter-spacing:.3px;color:#1f1a17;margin-bottom:6px;">${BRAND}</div>
+              <div style="color:#f05a28;font-weight:700;font-size:16px;margin-bottom:18px;">${subheading || "Auto Apply Summary"}</div>
+              <div style="margin:0 0 10px;font-size:22px;font-weight:700;color:#1f1a17;">${heading}</div>
+              <div style="font-size:14px;color:#6b5f58;line-height:1.6;margin:12px 0 18px;">${contentHtml}</div>
+              <div style="margin-top:18px;padding-top:14px;border-top:1px dashed #eadfd4;color:#9b8b81;font-size:12px;">${footer}</div>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>`;
 }
 
 function employerEmailTemplate({ contentHtml, footer, headerTitle }) {
   return `
-  <div style="background:#f5f6fb;padding:34px 0;font-family:Arial,sans-serif;">
-    <div style="max-width:680px;margin:0 auto;background:#ffffff;border-radius:22px;border:1px solid #e5e9f2;overflow:hidden;">
-      <div style="padding:26px 28px;background:linear-gradient(135deg,#ffe3b1 0%,#ffd1dc 45%,#c7d7ff 100%);color:#1f2333;text-align:center;">
-        <div style="font-size:12px;font-weight:700;letter-spacing:.25em;text-transform:uppercase;opacity:.85;">Candidate Submission</div>
-        <div style="margin-top:10px;font-size:28px;font-weight:900;letter-spacing:.3px;">${headerTitle || "Job Application"}</div>
-        <div style="margin-top:6px;font-size:14px;font-weight:700;">Ready for immediate review</div>
-      </div>
-      <div style="padding:26px 28px;background:#ffffff;color:#1f2333;text-align:center;">
-        ${contentHtml}
-        <div style="margin-top:24px;padding-top:14px;border-top:1px solid #e9edf5;color:#8b95ad;font-size:12px;text-align:center;">
-          ${footer}
-        </div>
-      </div>
-    </div>
-  </div>`;
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f5f6fb;margin:0;padding:0;font-family:Arial,sans-serif;">
+    <tr>
+      <td align="center" style="padding:24px 12px;">
+        <table role="presentation" width="680" cellspacing="0" cellpadding="0" style="width:100%;max-width:680px;background:#ffffff;border-radius:22px;border:1px solid #e5e9f2;overflow:hidden;">
+          <tr>
+            <td align="center" style="padding:24px 22px;background:linear-gradient(135deg,#ffe3b1 0%,#ffd1dc 45%,#c7d7ff 100%);color:#1f2333;">
+              <div style="font-size:12px;font-weight:700;letter-spacing:.25em;text-transform:uppercase;opacity:.85;">Candidate Submission</div>
+              <div style="margin-top:10px;font-size:28px;font-weight:900;letter-spacing:.3px;">${headerTitle || "Job Application"}</div>
+              <div style="margin-top:6px;font-size:14px;font-weight:700;">Ready for immediate review</div>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:22px 22px 26px;background:#ffffff;color:#1f2333;">
+              ${contentHtml}
+              <div style="margin-top:22px;padding-top:14px;border-top:1px solid #e9edf5;color:#8b95ad;font-size:12px;text-align:center;">
+                ${footer}
+              </div>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>`;
 }
 
 function dailyEmailTemplate({ heading, subheading, contentHtml, footer }) {
   return `
-  <div style="background:#f5f6fb;padding:34px 0;font-family:Arial,sans-serif;">
-    <div style="max-width:680px;margin:0 auto;background:#ffffff;border-radius:22px;border:1px solid #e5e9f2;overflow:hidden;">
-      <div style="padding:26px 28px;background:linear-gradient(135deg,#ffe3b1 0%,#ffd1dc 45%,#c7d7ff 100%);color:#1f2333;text-align:center;">
-        <div style="display:flex;justify-content:center;gap:10px;align-items:center;margin-bottom:6px;">
-          <span style="width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#8fb3ff,#7b61ff,#a6c1ff);display:inline-block;border:1px solid rgba(0,0,0,0.05);"></span>
-          <span style="font-size:16px;font-weight:800;letter-spacing:.2px;color:#1f2333;">MegaApply<span style="font-size:12px;vertical-align:top;">™</span></span>
-        </div>
-        <div style="margin-top:10px;font-size:28px;font-weight:900;letter-spacing:.3px;">${heading}</div>
-        <div style="margin-top:6px;font-size:14px;font-weight:700;">${subheading || "Daily Summary"}</div>
-      </div>
-      <div style="padding:26px 28px;background:#ffffff;color:#1f2333;text-align:center;">
-        ${contentHtml}
-        <div style="margin-top:24px;padding-top:14px;border-top:1px solid #e9edf5;color:#8b95ad;font-size:12px;text-align:center;">
-          ${footer}
-        </div>
-      </div>
-    </div>
-  </div>`;
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f5f6fb;margin:0;padding:0;font-family:Arial,sans-serif;">
+    <tr>
+      <td align="center" style="padding:24px 12px;">
+        <table role="presentation" width="680" cellspacing="0" cellpadding="0" style="width:100%;max-width:680px;background:#ffffff;border-radius:22px;border:1px solid #e5e9f2;overflow:hidden;">
+          <tr>
+            <td align="center" style="padding:24px 22px;background:linear-gradient(135deg,#ffe3b1 0%,#ffd1dc 45%,#c7d7ff 100%);color:#1f2333;">
+              <table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 auto 8px;">
+                <tr>
+                  <td style="width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#8fb3ff,#7b61ff,#a6c1ff);border:1px solid rgba(0,0,0,0.05);"></td>
+                  <td style="padding-left:10px;font-size:16px;font-weight:800;letter-spacing:.2px;color:#1f2333;">MegaApply<span style="font-size:12px;vertical-align:top;">™</span></td>
+                </tr>
+              </table>
+              <div style="margin-top:4px;font-size:28px;font-weight:900;letter-spacing:.3px;">${heading}</div>
+              <div style="margin-top:6px;font-size:14px;font-weight:700;">${subheading || "Daily Summary"}</div>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:22px 22px 26px;background:#ffffff;color:#1f2333;">
+              ${contentHtml}
+              <div style="margin-top:22px;padding-top:14px;border-top:1px solid #e9edf5;color:#8b95ad;font-size:12px;text-align:center;">
+                ${footer}
+              </div>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>`;
 }
 
 // --- Scraper helpers (Firebase-only scheduled job) ---
@@ -451,38 +491,39 @@ async function sendEmployerEmail({ job, userProfile }) {
   const jobLink = job.url || "";
   const displayJobTitle = preserveAcronyms(job.title || "");
   const contentHtml = `
-    <div style="display:flex;gap:18px;align-items:center;justify-content:center;flex-wrap:wrap;">
-      <div style="width:96px;height:96px;border-radius:20px;overflow:hidden;background:#f2f4f8;border:1px solid #e5e9f2;display:flex;align-items:center;justify-content:center;">
-        ${
-          hasPhoto
-            ? `<img src="${photoUrl || "cid:profile-photo"}" alt="Profile" style="width:100%;height:100%;object-fit:cover;" />`
-            : `<div style="font-size:34px;font-weight:900;color:#4b5565;">${(userProfile.name || "C").slice(0, 1).toUpperCase()}</div>`
-        }
-      </div>
-      <div style="text-align:center;">
-        <div style="font-size:26px;font-weight:900;color:#1f2333;letter-spacing:.2px;">${userProfile.name || "Candidate"}</div>
-        <div style="font-size:15px;color:#5d667b;margin-top:4px;font-weight:700;">${userProfile.title || "Role Title"}</div>
-        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center;">
-          <span style="padding:6px 10px;border-radius:999px;background:#eef2ff;border:1px solid #d7def3;color:#55607a;font-size:12px;">Applied for</span>
-          <span style="padding:6px 10px;border-radius:999px;background:#ffd9a0;color:#3a2600;font-size:12px;font-weight:800;">${displayJobTitle || "Job"}</span>
-          ${job.location ? `<span style="padding:6px 10px;border-radius:999px;background:#b8c9ff;color:#18203a;font-size:12px;font-weight:800;">${job.location}</span>` : ""}
-        </div>
-      </div>
-    </div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+      <tr>
+        <td align="center">
+          <div style="width:96px;height:96px;border-radius:20px;overflow:hidden;background:#f2f4f8;border:1px solid #e5e9f2;display:inline-block;">
+            ${
+              hasPhoto
+                ? `<img src="${photoUrl || "cid:profile-photo"}" alt="Profile" style="width:100%;height:100%;object-fit:cover;display:block;" />`
+                : `<div style="width:96px;height:96px;line-height:96px;text-align:center;font-size:34px;font-weight:900;color:#4b5565;">${(userProfile.name || "C").slice(0, 1).toUpperCase()}</div>`
+            }
+          </div>
+          <div style="font-size:24px;font-weight:900;color:#1f2333;letter-spacing:.2px;margin-top:12px;">${userProfile.name || "Candidate"}</div>
+          <div style="font-size:14px;color:#5d667b;margin-top:4px;font-weight:700;">${userProfile.title || "Role Title"}</div>
+          <div style="margin-top:10px;">
+            <span style="display:inline-block;margin:4px;padding:6px 10px;border-radius:999px;background:#eef2ff;border:1px solid #d7def3;color:#55607a;font-size:12px;">Applied for</span>
+            <span style="display:inline-block;margin:4px;padding:6px 10px;border-radius:999px;background:#ffd9a0;color:#3a2600;font-size:12px;font-weight:800;">${displayJobTitle || "Job"}</span>
+            ${job.location ? `<span style="display:inline-block;margin:4px;padding:6px 10px;border-radius:999px;background:#b8c9ff;color:#18203a;font-size:12px;font-weight:800;">${job.location}</span>` : ""}
+          </div>
+        </td>
+      </tr>
+    </table>
     <div style="margin-top:18px;padding:18px;border-radius:16px;background:#f9fafc;border:1px solid #e9edf5;text-align:center;">
       <div style="font-size:12px;color:#8b95ad;text-transform:uppercase;letter-spacing:.4px;">Professional Summary</div>
       <div style="margin-top:8px;color:#1f2333;line-height:1.7;font-size:15px;">${userProfile.bio || "No summary provided."}</div>
     </div>
-    <div style="margin-top:18px;display:flex;gap:12px;flex-wrap:wrap;justify-content:center;">
+    <div style="margin-top:18px;text-align:center;">
       ${
         cvLink
-          ? `<a href="${cvLink}" style="display:inline-block;padding:14px 18px;border-radius:999px;background:linear-gradient(135deg,#ffcc7a,#ff9ab3);color:#3a2600;text-decoration:none;font-weight:900;letter-spacing:.2px;">View CV (PDF)</a>`
-          : `<span style="display:inline-block;padding:14px 18px;border-radius:999px;background:#eef1f6;color:#7a8498;">CV not provided</span>`
+          ? `<a href="${cvLink}" style="display:inline-block;margin:4px;padding:14px 18px;border-radius:999px;background:linear-gradient(135deg,#ffcc7a,#ff9ab3);color:#3a2600;text-decoration:none;font-weight:900;letter-spacing:.2px;">View CV (PDF)</a>`
+          : `<span style="display:inline-block;margin:4px;padding:14px 18px;border-radius:999px;background:#eef1f6;color:#7a8498;">CV not provided</span>`
       }
     </div>
-    <div style="margin-top:14px;display:flex;justify-content:center;gap:12px;flex-wrap:wrap;color:#7e89a3;font-size:12px;">
-      <div>Availability: Immediate</div>
-      <div>Attachments: CV ${userProfile.cvPath ? "✓" : "—"} · Photo ${userProfile.photoPath ? "✓" : "—"}</div>
+    <div style="margin-top:14px;text-align:center;color:#7e89a3;font-size:12px;">
+      Availability: Immediate · Attachments: CV ${userProfile.cvPath ? "✓" : "—"} · Photo ${userProfile.photoPath ? "✓" : "—"}
     </div>
   `;
 
@@ -510,7 +551,7 @@ async function sendEmployerEmail({ job, userProfile }) {
   });
 
   await transporter.sendMail({
-    from: MAIL_FROM.value() || userProfile.email,
+    from: buildFrom("Job Application", userProfile.email),
     to: job.email,
     subject: `${userProfile.name || "Candidate"}: Application for ${displayJobTitle ? `${displayJobTitle} Vacancy` : "Job Vacancy"}`,
     html,
@@ -532,10 +573,10 @@ function formatCategoryList(byCat) {
   return Object.entries(byCat)
     .map(
       ([cat, count]) =>
-        `<div style="display:flex;justify-content:space-between;gap:12px;padding:8px 12px;border:1px solid #eadfd4;border-radius:12px;margin:6px 0;background:#fff;">` +
-        `<span style="font-weight:600;color:#1f1a17;">${cat}</span>` +
-        `<span style="color:#f05a28;font-weight:700;">${count}</span>` +
-        `</div>`
+        `<tr>` +
+        `<td style="padding:8px 12px;border:1px solid #eadfd4;border-right:0;border-radius:12px 0 0 12px;background:#fff;font-weight:600;color:#1f1a17;">${cat}</td>` +
+        `<td align="right" style="padding:8px 12px;border:1px solid #eadfd4;border-left:0;border-radius:0 12px 12px 0;background:#fff;color:#f05a28;font-weight:700;">${count}</td>` +
+        `</tr>`
     )
     .join("");
 }
@@ -549,27 +590,29 @@ async function sendUserSummaryEmail({ userProfile, jobs, lifetimeTotal = 0 }) {
   const photoUrl = userProfile.photoUrl || "";
 
   const contentHtml = `
-    <div style="display:flex;gap:18px;align-items:center;justify-content:center;flex-wrap:wrap;">
-      <div style="width:96px;height:96px;border-radius:20px;overflow:hidden;background:#f2f4f8;border:1px solid #e5e9f2;display:flex;align-items:center;justify-content:center;">
-        ${
-          photoUrl
-            ? `<img src="${photoUrl}" alt="Profile" style="width:100%;height:100%;object-fit:cover;" />`
-            : `<div style="font-size:34px;font-weight:900;color:#4b5565;">${(userProfile.name || "U").slice(0, 1).toUpperCase()}</div>`
-        }
-      </div>
-      <div style="text-align:center;">
-        <div style="font-size:22px;font-weight:900;color:#1f2333;letter-spacing:.2px;">${userProfile.name || "Your Profile"}</div>
-        <div style="font-size:14px;color:#5d667b;margin-top:4px;font-weight:700;">${userProfile.title || "Job Seeker"}</div>
-        <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">
-          <span style="padding:8px 12px;border-radius:999px;background:#eef2ff;border:1px solid #d7def3;color:#55607a;font-size:13px;font-weight:700;letter-spacing:.2px;">Daily total</span>
-          <span style="padding:10px 16px;border-radius:999px;background:#ffd9a0;color:#3a2600;font-size:16px;font-weight:900;letter-spacing:.2px;">${total} applications</span>
-          <span style="padding:10px 16px;border-radius:999px;background:#b8c9ff;color:#18203a;font-size:16px;font-weight:900;letter-spacing:.2px;">Lifetime ${lifetimeTotal}</span>
-        </div>
-      </div>
-    </div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+      <tr>
+        <td align="center">
+          <div style="width:96px;height:96px;border-radius:20px;overflow:hidden;background:#f2f4f8;border:1px solid #e5e9f2;display:inline-block;">
+            ${
+              photoUrl
+                ? `<img src="${photoUrl}" alt="Profile" style="width:100%;height:100%;object-fit:cover;display:block;" />`
+                : `<div style="width:96px;height:96px;line-height:96px;text-align:center;font-size:34px;font-weight:900;color:#4b5565;">${(userProfile.name || "U").slice(0, 1).toUpperCase()}</div>`
+            }
+          </div>
+          <div style="font-size:22px;font-weight:900;color:#1f2333;letter-spacing:.2px;margin-top:12px;">${userProfile.name || "Your Profile"}</div>
+          <div style="font-size:14px;color:#5d667b;margin-top:4px;font-weight:700;">${userProfile.title || "Job Seeker"}</div>
+          <div style="margin-top:12px;">
+            <span style="display:inline-block;margin:4px;padding:8px 12px;border-radius:999px;background:#eef2ff;border:1px solid #d7def3;color:#55607a;font-size:13px;font-weight:700;letter-spacing:.2px;">Daily total</span>
+            <span style="display:inline-block;margin:4px;padding:10px 16px;border-radius:999px;background:#ffd9a0;color:#3a2600;font-size:16px;font-weight:900;letter-spacing:.2px;">${total} applications</span>
+            <span style="display:inline-block;margin:4px;padding:10px 16px;border-radius:999px;background:#b8c9ff;color:#18203a;font-size:16px;font-weight:900;letter-spacing:.2px;">Lifetime ${lifetimeTotal}</span>
+          </div>
+        </td>
+      </tr>
+    </table>
     <div style="margin-top:18px;padding:18px;border-radius:16px;background:#f9fafc;border:1px solid #e9edf5;text-align:center;">
       <div style="font-size:12px;color:#8b95ad;text-transform:uppercase;letter-spacing:.4px;">Applied by Category</div>
-      <div style="margin-top:8px;display:inline-block;text-align:left;width:100%;">${listHtml}</div>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:8px;">${listHtml}</table>
     </div>
     <div style="margin-top:14px;color:#7e89a3;font-size:12px;">We keep applying daily to new matches in your top 2 categories.</div>
   `;
@@ -582,7 +625,7 @@ async function sendUserSummaryEmail({ userProfile, jobs, lifetimeTotal = 0 }) {
   });
 
   await transporter.sendMail({
-    from: MAIL_FROM.value() || "no-reply@megaapply.com",
+    from: buildFrom(BRAND, "no-reply@megaapply.com"),
     to: userProfile.email,
     subject: `MegaApply™ Daily Summary - ${total} applications`,
     html
@@ -598,27 +641,29 @@ async function sendUserFirstEmail({ userProfile, jobs }) {
   const photoUrl = userProfile.photoUrl || "";
 
   const contentHtml = `
-    <div style="display:flex;gap:18px;align-items:center;justify-content:center;flex-wrap:wrap;">
-      <div style="width:96px;height:96px;border-radius:20px;overflow:hidden;background:#f2f4f8;border:1px solid #e5e9f2;display:flex;align-items:center;justify-content:center;">
-        ${
-          photoUrl
-            ? `<img src="${photoUrl}" alt="Profile" style="width:100%;height:100%;object-fit:cover;" />`
-            : `<div style="font-size:34px;font-weight:900;color:#4b5565;">${(userProfile.name || "U").slice(0, 1).toUpperCase()}</div>`
-        }
-      </div>
-      <div style="text-align:center;">
-        <div style="font-size:22px;font-weight:900;color:#1f2333;letter-spacing:.2px;">${userProfile.name || "Your Profile"}</div>
-        <div style="font-size:14px;color:#5d667b;margin-top:4px;font-weight:700;">${userProfile.title || "Job Seeker"}</div>
-        <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">
-          <span style="padding:8px 12px;border-radius:999px;background:#eef2ff;border:1px solid #d7def3;color:#55607a;font-size:13px;font-weight:700;letter-spacing:.2px;">First run</span>
-          <span style="padding:10px 16px;border-radius:999px;background:#ffd9a0;color:#3a2600;font-size:16px;font-weight:900;letter-spacing:.2px;">${total} applications</span>
-          <span style="padding:10px 16px;border-radius:999px;background:#b8c9ff;color:#18203a;font-size:16px;font-weight:900;letter-spacing:.2px;">${Object.keys(byCat).length} categories</span>
-        </div>
-      </div>
-    </div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+      <tr>
+        <td align="center">
+          <div style="width:96px;height:96px;border-radius:20px;overflow:hidden;background:#f2f4f8;border:1px solid #e5e9f2;display:inline-block;">
+            ${
+              photoUrl
+                ? `<img src="${photoUrl}" alt="Profile" style="width:100%;height:100%;object-fit:cover;display:block;" />`
+                : `<div style="width:96px;height:96px;line-height:96px;text-align:center;font-size:34px;font-weight:900;color:#4b5565;">${(userProfile.name || "U").slice(0, 1).toUpperCase()}</div>`
+            }
+          </div>
+          <div style="font-size:22px;font-weight:900;color:#1f2333;letter-spacing:.2px;margin-top:12px;">${userProfile.name || "Your Profile"}</div>
+          <div style="font-size:14px;color:#5d667b;margin-top:4px;font-weight:700;">${userProfile.title || "Job Seeker"}</div>
+          <div style="margin-top:12px;">
+            <span style="display:inline-block;margin:4px;padding:8px 12px;border-radius:999px;background:#eef2ff;border:1px solid #d7def3;color:#55607a;font-size:13px;font-weight:700;letter-spacing:.2px;">First run</span>
+            <span style="display:inline-block;margin:4px;padding:10px 16px;border-radius:999px;background:#ffd9a0;color:#3a2600;font-size:16px;font-weight:900;letter-spacing:.2px;">${total} applications</span>
+            <span style="display:inline-block;margin:4px;padding:10px 16px;border-radius:999px;background:#b8c9ff;color:#18203a;font-size:16px;font-weight:900;letter-spacing:.2px;">${Object.keys(byCat).length} categories</span>
+          </div>
+        </td>
+      </tr>
+    </table>
     <div style="margin-top:18px;padding:18px;border-radius:16px;background:#f9fafc;border:1px solid #e9edf5;text-align:center;">
       <div style="font-size:12px;color:#8b95ad;text-transform:uppercase;letter-spacing:.4px;">Applied by Category</div>
-      <div style="margin-top:8px;display:inline-block;text-align:left;width:100%;">${listHtml}</div>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:8px;">${listHtml}</table>
     </div>
     <div style="margin-top:14px;color:#7e89a3;font-size:12px;">
       Welcome to MegaApply™. We emailed employers your profile and CV and will keep applying daily.
@@ -633,7 +678,7 @@ async function sendUserFirstEmail({ userProfile, jobs }) {
   });
 
   await transporter.sendMail({
-    from: MAIL_FROM.value() || "no-reply@megaapply.com",
+    from: buildFrom(BRAND, "no-reply@megaapply.com"),
     to: userProfile.email,
     subject: `Welcome to MegaApply™ — ${total} applications sent`,
     html
