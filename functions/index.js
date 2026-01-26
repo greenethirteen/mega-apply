@@ -743,8 +743,9 @@ async function runAutoApplyForUser(user) {
     const lifetimeTotal = await getApplicationsCount(user.id);
     if (last === 0) {
       await sendUserFirstEmail({ userProfile: user, jobs: appliedJobs });
+    } else {
+      await sendUserSummaryEmail({ userProfile: user, jobs: appliedJobs, lifetimeTotal });
     }
-    await sendUserSummaryEmail({ userProfile: user, jobs: appliedJobs, lifetimeTotal });
   }
   return appliedJobs;
 }

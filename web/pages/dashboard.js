@@ -44,12 +44,26 @@ export default function Dashboard() {
   const [jobCounts, setJobCounts] = useState({ total: 0, byCategory: {} });
   const [jobsById, setJobsById] = useState({});
   const [applications, setApplications] = useState([]);
+  const [isSyncingApps, setIsSyncingApps] = useState(false);
+  const [lastRunAppliedCount, setLastRunAppliedCount] = useState(null);
+  const [autoApplyCategories, setAutoApplyCategories] = useState([]);
   const [hasSavedProfile, setHasSavedProfile] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isProfileLoading, setIsProfileLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isAutoApplying, setIsAutoApplying] = useState(false);
   const [exploreCategory, setExploreCategory] = useState("");
+
+  function parseApplicationsSnapshot(snap) {
+    if (!snap.exists()) return [];
+    const items = [];
+    snap.forEach((child) => {
+      const v = child.val() || {};
+      items.push({ jobId: child.key, appliedAt: v.appliedAt || 0 });
+    });
+    items.sort((a, b) => (b.appliedAt || 0) - (a.appliedAt || 0));
+    return items;
+  }
 
   useEffect(() => {
     const a = getFirebaseAuth();
@@ -70,15 +84,18 @@ export default function Dashboard() {
       if (snap.exists()) {
         setHasSavedProfile(true);
         setIsEditing(false);
+        const saved = snap.val() || {};
+        setAutoApplyCategories(Array.isArray(saved.categories) ? saved.categories : []);
         setProfile({
           ...profile,
-          ...snap.val(),
-          email: u.email || snap.val().email || ""
+          ...saved,
+          email: u.email || saved.email || ""
         });
       } else {
         setHasSavedProfile(false);
         setIsEditing(true);
         setProfile((p) => ({ ...p, email: u.email || "" }));
+        setAutoApplyCategories([]);
       }
       setIsProfileLoading(false);
     });
@@ -117,17 +134,7 @@ export default function Dashboard() {
     if (!db || !user) return;
     const appsRef = ref(db, `applications/${user.uid}`);
     const unsub = onValue(appsRef, (snap) => {
-      if (!snap.exists()) {
-        setApplications([]);
-        return;
-      }
-      const items = [];
-      snap.forEach((child) => {
-        const v = child.val() || {};
-        items.push({ jobId: child.key, appliedAt: v.appliedAt || 0 });
-      });
-      items.sort((a, b) => (b.appliedAt || 0) - (a.appliedAt || 0));
-      setApplications(items);
+      setApplications(parseApplicationsSnapshot(snap));
     });
     return () => unsub();
   }, [db, user]);
@@ -200,6 +207,8 @@ export default function Dashboard() {
       return;
     }
     setIsAutoApplying(true);
+    setIsSyncingApps(true);
+    setLastRunAppliedCount(null);
     setStatus("Auto apply enabled.");
     try {
       trackEvent("auto_apply_enabled", { categories: profile.categories });
@@ -208,13 +217,23 @@ export default function Dashboard() {
         autoApplyEnabled: true,
         lastAutoApply: 0
       });
+      setAutoApplyCategories(profile.categories);
       const base = process.env.NEXT_PUBLIC_FUNCTIONS_BASE_URL || "";
       if (base) {
         try {
-          await fetch(`${base}/runAutoApplyNow?userId=${user.uid}`);
+          const resp = await fetch(`${base}/runAutoApplyNow?userId=${user.uid}`);
+          if (resp.ok) {
+            const json = await resp.json();
+            if (typeof json.applied === "number") {
+              setLastRunAppliedCount(json.applied);
+            }
+          }
+          const snap = await get(ref(db, `applications/${user.uid}`));
+          setApplications(parseApplicationsSnapshot(snap));
         } catch {}
       }
     } finally {
+      setIsSyncingApps(false);
       setIsAutoApplying(false);
     }
   }
@@ -348,6 +367,9 @@ export default function Dashboard() {
             </button>
             <span className="tag">{profile.autoApplyEnabled ? "Auto apply is ON" : "Auto apply is OFF"}</span>
           </div>
+          <p className="notice" style={{ marginTop: 10 }}>
+            Daily auto-apply categories: {profile.autoApplyEnabled && autoApplyCategories.length ? autoApplyCategories.join(", ") : "None"}
+          </p>
           {isAutoApplying && (
             <div className="loading-bar compact" aria-hidden="true">
               <span />
@@ -357,7 +379,11 @@ export default function Dashboard() {
 
           <div style={{ marginTop: 20 }}>
             <h3 style={{ marginBottom: 6 }}>Auto applied jobs</h3>
-            <p className="notice">Total applications: {applications.length} · Sent today: {applicationsToday}</p>
+            <p className="notice">
+              Total applications: {applications.length} · Sent today: {applicationsToday}
+              {typeof lastRunAppliedCount === "number" ? ` · Last run: ${lastRunAppliedCount}` : ""}
+              {isSyncingApps ? " · Syncing…" : ""}
+            </p>
             <div className="scroll">
               {applications.length === 0 && (
                 <div className="notice">No applications yet.</div>
