@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "node -r dotenv/config src/entry.js",
-    "scrape": "node -r dotenv/config src/entry.js"
+    "scrape": "node -r dotenv/config src/entry.js",
+    "backfill": "node scripts/backfill-embeddings.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

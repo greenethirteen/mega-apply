@@ -3,8 +3,12 @@ import { onRequest } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret } from "firebase-functions/params";
 import nodemailer from "nodemailer";
+import crypto from "node:crypto";
 
-admin.initializeApp();
+admin.initializeApp({
+  databaseURL: "https://mega-apply-default-rtdb.firebaseio.com",
+  storageBucket: "mega-apply.firebasestorage.app"
+});
 
 const db = admin.database();
 const storage = admin.storage();
@@ -14,9 +18,31 @@ const SMTP_HOST = defineSecret("SMTP_HOST");
 const SMTP_USER = defineSecret("SMTP_USER");
 const SMTP_PASS = defineSecret("SMTP_PASS");
 const MAIL_FROM = defineSecret("MAIL_FROM");
+const ADMIN_TOKEN = defineSecret("ADMIN_TOKEN");
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+const FUNCTIONS_VERSION = "2026-01-31-1";
+const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || "text-embedding-3-small";
+const MATCH_STRICT_THRESHOLD = parseFloat(process.env.MATCH_STRICT_THRESHOLD || "0.65");
+const MATCH_THRESHOLD = parseFloat(process.env.MATCH_THRESHOLD || "0.58");
+const MATCH_KEYWORD_MIN = parseFloat(process.env.MATCH_KEYWORD_MIN || "0.12");
+const MATCH_KEYWORD_FALLBACK = parseFloat(process.env.MATCH_KEYWORD_FALLBACK || "0.10");
+const MAX_APPLY_PER_RUN = parseInt(process.env.MAX_APPLY_PER_RUN || "40", 10);
+const MAX_RUN_MS = parseInt(process.env.MAX_RUN_MS || "45000", 10);
+const MAX_MATCH_STATS_MS = parseInt(process.env.MAX_MATCH_STATS_MS || "45000", 10);
 const SAUDI_PAGES = parseInt(process.env.SAUDI_PAGES || "1", 10);
 const MIN_DESCRIPTION_LEN = parseInt(process.env.MIN_DESCRIPTION_LEN || "120", 10);
+
+function toPublicJob(id, job) {
+  if (!job) return null;
+  return {
+    id,
+    title: job.title || "",
+    category: job.category || "Uncategorized",
+    location: job.location || "",
+    createdAt: job.createdAt || "",
+    url: job.url || ""
+  };
+}
 
 const BRAND = "MegaApply™";
 const FOOTER = "Powered by So Jobless Inc.";
@@ -30,6 +56,97 @@ const CATEGORIES = [
   "Planning",
   "Estimation",
   "Procurement/Logistics"
+];
+
+const MATCH_KEYWORDS = [
+  "civil",
+  "mechanical",
+  "electrical",
+  "hse",
+  "qa/qc",
+  "qaqc",
+  "quality assurance",
+  "quality control",
+  "inspection",
+  "inspector",
+  "project management",
+  "project controls",
+  "planning",
+  "estimation",
+  "procurement",
+  "logistics",
+  "quantity surveyor",
+  "qs",
+  "quantity surveying",
+  "boq",
+  "bill of quantities",
+  "cost estimation",
+  "cost control",
+  "tender",
+  "tendering",
+  "take-off",
+  "quantity take-off",
+  "measurement",
+  "valuation",
+  "variation",
+  "claims",
+  "contract",
+  "fidic",
+  "site quantity",
+  "autocad",
+  "revit",
+  "etabs",
+  "staad",
+  "sap2000",
+  "primavera",
+  "p6",
+  "ms project",
+  "navisworks",
+  "bim",
+  "hvac",
+  "piping",
+  "pipeline",
+  "welding",
+  "ndt",
+  "iso 9001",
+  "safety",
+  "substation",
+  "switchgear",
+  "transformer",
+  "commissioning",
+  "site engineer",
+  "design engineer",
+  "maintenance"
+];
+
+const QS_ROLE_PHRASES = [
+  "quantity surveyor",
+  "quantity surveying",
+  "qs",
+  "cost control",
+  "cost estimation",
+  "estimation",
+  "boq",
+  "bill of quantities",
+  "tender",
+  "tendering",
+  "take-off",
+  "quantity take-off",
+  "measurement",
+  "valuation",
+  "claims",
+  "contract",
+  "fidic"
+];
+
+const QS_USER_HINTS = [
+  "quantity surveyor",
+  "quantity surveying",
+  "qs",
+  "estimation",
+  "cost control",
+  "cost estimation",
+  "boq"
 ];
 
 const LOCATION_WORDS = new Set([
@@ -151,6 +268,354 @@ function mailer() {
     secure: port === 465,
     auth: { user, pass }
   });
+}
+
+function normalizeEmbeddingInput(text) {
+  return String(text || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 4000);
+}
+
+function hashText(text) {
+  return crypto.createHash("sha256").update(String(text || "")).digest("hex");
+}
+
+async function getEmbedding(text) {
+  const apiKey = OPENAI_API_KEY.value();
+  if (!apiKey) throw new Error("OPENAI_API_KEY missing for embeddings");
+  const input = normalizeEmbeddingInput(text);
+  if (!input) return null;
+  const payload = {
+    model: EMBEDDING_MODEL,
+    input
+  };
+  const res = await fetch("https://api.openai.com/v1/embeddings", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    const err = await res.text().catch(() => "");
+    throw new Error(`OpenAI Embeddings HTTP ${res.status}: ${err.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const embedding = data?.data?.[0]?.embedding || null;
+  return Array.isArray(embedding) ? embedding : null;
+}
+
+async function getEmbeddingsBatch(texts = []) {
+  const apiKey = OPENAI_API_KEY.value();
+  if (!apiKey) throw new Error("OPENAI_API_KEY missing for embeddings");
+  const inputs = texts.map((t) => normalizeEmbeddingInput(t)).filter(Boolean);
+  if (!inputs.length) return [];
+  const payload = {
+    model: EMBEDDING_MODEL,
+    input: inputs
+  };
+  const res = await fetch("https://api.openai.com/v1/embeddings", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    const err = await res.text().catch(() => "");
+    throw new Error(`OpenAI Embeddings HTTP ${res.status}: ${err.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  return Array.isArray(data?.data) ? data.data.map((d) => d.embedding) : [];
+}
+
+function requireAdminToken(req) {
+  const token = req.get("x-admin-token") || req.query.token || "";
+  const expected = ADMIN_TOKEN.value();
+  if (!expected) return { ok: false, status: 400, message: "ADMIN_TOKEN not configured" };
+  if (token !== expected) return { ok: false, status: 403, message: "Invalid admin token" };
+  return { ok: true };
+}
+
+async function backfillJobEmbeddingsBatch({ startAfter = null, limit = 250 }) {
+  let query = db.ref("jobs").orderByKey().limitToFirst(limit);
+  if (startAfter) query = db.ref("jobs").orderByKey().startAfter(startAfter).limitToFirst(limit);
+  const snap = await query.once("value");
+  if (!snap.exists()) {
+    return { processed: 0, updated: 0, skipped: 0, lastKey: null };
+  }
+  const jobs = [];
+  snap.forEach((child) => jobs.push({ id: child.key, ...child.val() }));
+  let processed = 0;
+  let updated = 0;
+  let skipped = 0;
+  const toEmbed = [];
+
+  for (const job of jobs) {
+    processed += 1;
+    const text = buildJobText(job);
+    if (!text) {
+      skipped += 1;
+      continue;
+    }
+    const textHash = hashText(text);
+    const hasEmbedding =
+      Array.isArray(job.embedding) &&
+      job.embedding.length > 0 &&
+      job.embeddingHash === textHash &&
+      job.embeddingModel === EMBEDDING_MODEL;
+    if (hasEmbedding) {
+      skipped += 1;
+      continue;
+    }
+    toEmbed.push({ id: job.id, text, hash: textHash });
+  }
+
+  const batchSize = 50;
+  for (let i = 0; i < toEmbed.length; i += batchSize) {
+    const chunk = toEmbed.slice(i, i + batchSize);
+    const embeddings = await getEmbeddingsBatch(chunk.map((c) => c.text));
+    const updates = {};
+    chunk.forEach((item, idx) => {
+      const embedding = embeddings[idx];
+      if (!Array.isArray(embedding)) return;
+      updates[`jobs/${item.id}/embedding`] = embedding;
+      updates[`jobs/${item.id}/embeddingHash`] = item.hash;
+      updates[`jobs/${item.id}/embeddingModel`] = EMBEDDING_MODEL;
+      updated += 1;
+    });
+    if (Object.keys(updates).length) {
+      await db.ref().update(updates);
+    }
+  }
+
+  const lastKey = jobs.length ? jobs[jobs.length - 1].id : null;
+  return { processed, updated, skipped, lastKey };
+}
+
+function cosineSimilarity(a = [], b = []) {
+  if (!a.length || !b.length || a.length !== b.length) return 0;
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    dot += x * y;
+    normA += x * x;
+    normB += y * y;
+  }
+  if (!normA || !normB) return 0;
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+function extractKeywordHits(text) {
+  const hay = String(text || "").toLowerCase();
+  const hits = new Set();
+  for (const kw of MATCH_KEYWORDS) {
+    if (hay.includes(kw)) hits.add(kw);
+  }
+  return hits;
+}
+
+function normalizeForMatch(text) {
+  return String(text || "").toLowerCase();
+}
+
+function hasAnyPhrase(hay, phrases) {
+  if (!hay) return false;
+  return phrases.some((p) => hay.includes(p));
+}
+
+function hasTitleTokenMatch(userTitle, jobText) {
+  if (!userTitle || !jobText) return false;
+  const tokens = String(userTitle)
+    .toLowerCase()
+    .split(/[^a-z0-9]+/g)
+    .filter((t) => t.length >= 4);
+  if (!tokens.length) return false;
+  return tokens.some((t) => jobText.includes(t));
+}
+
+function buildUserText(user) {
+  return normalizeEmbeddingInput([user?.title, user?.bio].filter(Boolean).join("\n"));
+}
+
+function buildJobText(job) {
+  return normalizeEmbeddingInput([job?.title, job?.description].filter(Boolean).join("\n"));
+}
+
+async function ensureUserEmbedding(user) {
+  const text = buildUserText(user);
+  if (!text) return { embedding: null, keywords: new Set(), text };
+  const textHash = hashText(text);
+  if (
+    Array.isArray(user?.profileEmbedding) &&
+    user.profileEmbedding.length > 0 &&
+    user.profileEmbeddingHash === textHash &&
+    user.profileEmbeddingModel === EMBEDDING_MODEL
+  ) {
+    return { embedding: user.profileEmbedding, keywords: extractKeywordHits(text), text };
+  }
+  const embedding = await getEmbedding(text);
+  if (embedding) {
+    await db.ref(`users/${user.id}`).update({
+      profileEmbedding: embedding,
+      profileEmbeddingHash: textHash,
+      profileEmbeddingModel: EMBEDDING_MODEL
+    });
+  }
+  return { embedding, keywords: extractKeywordHits(text), text };
+}
+
+async function ensureJobEmbedding(job, jobId) {
+  const text = buildJobText(job);
+  if (!text) return null;
+  const textHash = hashText(text);
+  if (
+    Array.isArray(job?.embedding) &&
+    job.embedding.length > 0 &&
+    job.embeddingHash === textHash &&
+    job.embeddingModel === EMBEDDING_MODEL
+  ) {
+    return job.embedding;
+  }
+  const embedding = await getEmbedding(text);
+  if (embedding) {
+    await db.ref(`jobs/${jobId}`).update({
+      embedding,
+      embeddingHash: textHash,
+      embeddingModel: EMBEDDING_MODEL
+    });
+  }
+  return embedding;
+}
+
+function scoreJobMatch({ userEmbedding, jobEmbedding, userKeywords, jobKeywords, userTitle, jobTitle, jobText }) {
+  const userCount = userKeywords.size;
+  const overlap = [...userKeywords].filter((k) => jobKeywords.has(k));
+  const keywordScore = userCount ? overlap.length / Math.max(3, userCount) : 0;
+  const textHay = normalizeForMatch(jobText);
+  const userTitleLower = normalizeForMatch(userTitle);
+  const userIsQS = userTitleLower.includes("quantity surveyor") || hasAnyPhrase(userTitleLower, QS_USER_HINTS);
+  const rolePhraseHit = userIsQS && hasAnyPhrase(textHay, QS_ROLE_PHRASES);
+  const titleTokenHit = hasTitleTokenMatch(userTitle, textHay);
+  const titleHit =
+    userTitle &&
+    jobTitle &&
+    String(jobTitle).toLowerCase().includes(String(userTitle).toLowerCase());
+
+  if (Array.isArray(userEmbedding) && Array.isArray(jobEmbedding) && userEmbedding.length && jobEmbedding.length) {
+    const similarity = cosineSimilarity(userEmbedding, jobEmbedding);
+    const strictPass = similarity >= MATCH_STRICT_THRESHOLD;
+    const blendedPass = similarity >= MATCH_THRESHOLD && (userCount ? keywordScore >= MATCH_KEYWORD_MIN : true);
+    const keywordFallback = userCount ? keywordScore >= MATCH_KEYWORD_FALLBACK : false;
+    return {
+      match: strictPass || blendedPass || keywordFallback || titleHit || titleTokenHit || rolePhraseHit,
+      similarity,
+      keywordScore,
+      keywords: overlap.slice(0, 6)
+    };
+  }
+
+  const fallbackPass = titleHit || titleTokenHit || rolePhraseHit || (userCount ? keywordScore >= MATCH_KEYWORD_FALLBACK : false);
+  return {
+    match: fallbackPass,
+    similarity: 0,
+    keywordScore,
+    keywords: overlap.slice(0, 6)
+  };
+}
+
+async function computeMatchStatsForUser(user, opts = {}) {
+  let totalJobs = 0;
+  let totalWithEmail = 0;
+  const userCtx = await ensureUserEmbedding(user);
+  if (!userCtx.embedding) {
+    return {
+      totalJobs,
+      totalWithEmail,
+      matchingJobs: 0
+    };
+  }
+
+  const startTime = Date.now();
+  let matchingJobs = 0;
+  let startAfter = null;
+  while (true) {
+    if (Date.now() - startTime > MAX_MATCH_STATS_MS - 1000) {
+      break;
+    }
+    const { jobs, lastKey } = await loadJobsPage({ startAfter, limit: 200 });
+    if (!jobs.length) break;
+    totalJobs += jobs.length;
+    totalWithEmail += jobs.filter((j) => j.email).length;
+
+    const missing = [];
+    const prepared = jobs.map((job) => {
+      const text = buildJobText(job);
+      const textHash = text ? hashText(text) : null;
+      const hasEmbedding =
+        Array.isArray(job.embedding) &&
+        job.embedding.length > 0 &&
+        job.embeddingHash === textHash &&
+        job.embeddingModel === EMBEDDING_MODEL;
+      if (opts.backfillEmbeddings && !hasEmbedding && text) {
+        missing.push({ id: job.id, text, hash: textHash });
+      }
+      return { ...job, _text: text, _hash: textHash, _hasEmbedding: hasEmbedding };
+    });
+    const preparedById = new Map(prepared.map((job) => [job.id, job]));
+
+    if (opts.backfillEmbeddings && missing.length) {
+      for (let i = 0; i < missing.length; i += 50) {
+        const chunk = missing.slice(i, i + 50);
+        const embeddings = await getEmbeddingsBatch(chunk.map((c) => c.text));
+        const updates = {};
+        chunk.forEach((item, idx) => {
+          const embedding = embeddings[idx];
+          if (!Array.isArray(embedding)) return;
+          updates[`jobs/${item.id}/embedding`] = embedding;
+          updates[`jobs/${item.id}/embeddingHash`] = item.hash;
+          updates[`jobs/${item.id}/embeddingModel`] = EMBEDDING_MODEL;
+          const target = preparedById.get(item.id);
+          if (target) {
+            target.embedding = embedding;
+            target._hasEmbedding = true;
+          }
+        });
+        if (Object.keys(updates).length) {
+          await db.ref().update(updates);
+        }
+      }
+    }
+
+    for (const job of prepared) {
+      if (!job.email) continue;
+      const jobKeywords = extractKeywordHits(job._text || "");
+      const score = scoreJobMatch({
+        userEmbedding: userCtx.embedding,
+        jobEmbedding: job._hasEmbedding ? job.embedding : null,
+        userKeywords: userCtx.keywords,
+        jobKeywords,
+        userTitle: user.title,
+        jobTitle: job.title,
+        jobText: job._text || ""
+      });
+      if (score.match) matchingJobs += 1;
+    }
+
+    startAfter = lastKey;
+    if (!lastKey) break;
+  }
+  return {
+    totalJobs,
+    totalWithEmail,
+    matchingJobs
+  };
 }
 
 function extractEmailAddress(raw) {
@@ -460,6 +925,15 @@ export const scrapeSaudiJobsDaily = onSchedule(
         }
         const aiCategory = normalizeCategory(ai.category);
         const category = aiCategory || chooseCategory(finalTitle, desc);
+        let embedding = null;
+        let embeddingHash = null;
+        try {
+          const jobText = buildJobText({ title: finalTitle, description: desc });
+          if (jobText) {
+            embedding = await getEmbedding(jobText);
+            embeddingHash = hashText(jobText);
+          }
+        } catch {}
         await db.ref(`jobs/${jobId}`).set({
           title: finalTitle,
           description: desc,
@@ -468,7 +942,10 @@ export const scrapeSaudiJobsDaily = onSchedule(
           email: chosen,
           emails,
           url: jobUrl,
-          createdAt: nowIso
+          createdAt: nowIso,
+          embedding,
+          embeddingHash,
+          embeddingModel: embedding ? EMBEDDING_MODEL : null
         });
       }
     }
@@ -585,8 +1062,6 @@ async function sendUserSummaryEmail({ userProfile, jobs, lifetimeTotal = 0 }) {
   if (!userProfile.email) return;
   const transporter = mailer();
   const total = jobs.length;
-  const byCat = summarizeJobsByCategory(jobs);
-  const listHtml = formatCategoryList(byCat);
   const photoUrl = userProfile.photoUrl || "";
 
   const contentHtml = `
@@ -610,11 +1085,7 @@ async function sendUserSummaryEmail({ userProfile, jobs, lifetimeTotal = 0 }) {
         </td>
       </tr>
     </table>
-    <div style="margin-top:18px;padding:18px;border-radius:16px;background:#f9fafc;border:1px solid #e9edf5;text-align:center;">
-      <div style="font-size:12px;color:#8b95ad;text-transform:uppercase;letter-spacing:.4px;">Applied by Category</div>
-      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:8px;">${listHtml}</table>
-    </div>
-    <div style="margin-top:14px;color:#7e89a3;font-size:12px;">We keep applying daily to new matches in your top 2 categories.</div>
+    <div style="margin-top:14px;color:#7e89a3;font-size:12px;">We keep applying daily to new matches based on your profile—even when the job title doesn't say it explicitly but the description fits your skills.</div>
   `;
 
   const html = dailyEmailTemplate({
@@ -632,66 +1103,55 @@ async function sendUserSummaryEmail({ userProfile, jobs, lifetimeTotal = 0 }) {
   });
 }
 
-async function sendUserFirstEmail({ userProfile, jobs }) {
-  if (!userProfile.email) return;
-  const transporter = mailer();
-  const total = jobs.length;
-  const byCat = summarizeJobsByCategory(jobs);
-  const listHtml = formatCategoryList(byCat);
-  const photoUrl = userProfile.photoUrl || "";
 
-  const contentHtml = `
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
-      <tr>
-        <td align="center">
-          <div style="width:96px;height:96px;border-radius:20px;overflow:hidden;background:#f2f4f8;border:1px solid #e5e9f2;display:inline-block;">
-            ${
-              photoUrl
-                ? `<img src="${photoUrl}" alt="Profile" style="width:100%;height:100%;object-fit:cover;display:block;" />`
-                : `<div style="width:96px;height:96px;line-height:96px;text-align:center;font-size:34px;font-weight:900;color:#4b5565;">${(userProfile.name || "U").slice(0, 1).toUpperCase()}</div>`
-            }
-          </div>
-          <div style="font-size:22px;font-weight:900;color:#1f2333;letter-spacing:.2px;margin-top:12px;">${userProfile.name || "Your Profile"}</div>
-          <div style="font-size:14px;color:#5d667b;margin-top:4px;font-weight:700;">${userProfile.title || "Job Seeker"}</div>
-          <div style="margin-top:12px;">
-            <span style="display:inline-block;margin:4px;padding:8px 12px;border-radius:999px;background:#eef2ff;border:1px solid #d7def3;color:#55607a;font-size:13px;font-weight:700;letter-spacing:.2px;">First run</span>
-            <span style="display:inline-block;margin:4px;padding:10px 16px;border-radius:999px;background:#ffd9a0;color:#3a2600;font-size:16px;font-weight:900;letter-spacing:.2px;">${total} applications</span>
-            <span style="display:inline-block;margin:4px;padding:10px 16px;border-radius:999px;background:#b8c9ff;color:#18203a;font-size:16px;font-weight:900;letter-spacing:.2px;">${Object.keys(byCat).length} categories</span>
-          </div>
-        </td>
-      </tr>
-    </table>
-    <div style="margin-top:18px;padding:18px;border-radius:16px;background:#f9fafc;border:1px solid #e9edf5;text-align:center;">
-      <div style="font-size:12px;color:#8b95ad;text-transform:uppercase;letter-spacing:.4px;">Applied by Category</div>
-      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:8px;">${listHtml}</table>
-    </div>
-    <div style="margin-top:14px;color:#7e89a3;font-size:12px;">
-      Welcome to MegaApply™. We emailed employers your profile and CV and will keep applying daily.
-    </div>
-  `;
-
-  const html = dailyEmailTemplate({
-    heading: "Your First Auto-Apply Run Is Complete",
-    subheading: "Welcome to MegaApply™",
-    contentHtml,
-    footer: FOOTER
-  });
-
-  await transporter.sendMail({
-    from: buildFrom(BRAND, "no-reply@megaapply.com"),
-    to: userProfile.email,
-    subject: `Welcome to MegaApply™ — ${total} applications sent`,
-    html
-  });
+async function loadJobsPage({ startAfter = null, limit = 200 }) {
+  let query = db.ref("jobs").orderByKey().limitToFirst(limit);
+  if (startAfter) {
+    query = db.ref("jobs").orderByKey().startAfter(startAfter).limitToFirst(limit);
+  }
+  const snap = await query.once("value");
+  const jobs = [];
+  snap.forEach((child) => jobs.push({ id: child.key, ...child.val() }));
+  if (jobs.length > 1 || limit <= 1) {
+    const lastKey = jobs.length ? jobs[jobs.length - 1].id : null;
+    return { jobs, lastKey, source: "sdk" };
+  }
+  const fallback = await loadJobsPageViaRest({ startAfter, limit });
+  return { ...fallback, source: "rest" };
 }
 
-async function loadJobsSince(ts) {
-  const snap = await db.ref("jobs").orderByChild("createdAt").startAt(new Date(ts).toISOString()).once("value");
-  const jobs = [];
-  snap.forEach((child) => {
-    jobs.push({ id: child.key, ...child.val() });
-  });
-  return jobs;
+async function getAccessToken() {
+  const cred = admin.app().options.credential;
+  if (cred && typeof cred.getAccessToken === "function") {
+    const token = await cred.getAccessToken();
+    return token?.access_token || null;
+  }
+  return null;
+}
+
+async function loadJobsPageViaRest({ startAfter = null, limit = 200 }) {
+  const token = await getAccessToken();
+  const base = admin.app().options.databaseURL;
+  if (!base) return { jobs: [], lastKey: null };
+  const params = new URLSearchParams();
+  params.set("orderBy", "\"$key\"");
+  params.set("limitToFirst", String(limit));
+  if (startAfter) params.set("startAt", JSON.stringify(startAfter));
+  if (token) params.set("auth", token);
+  const url = `${base}/jobs.json?${params.toString()}`;
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    throw new Error(`REST jobs fetch failed (${resp.status})`);
+  }
+  const data = await resp.json();
+  const keys = data ? Object.keys(data) : [];
+  const jobs = keys.map((key) => ({ id: key, ...(data[key] || {}) }));
+  let normalized = jobs;
+  if (startAfter && normalized.length && normalized[0]?.id === startAfter) {
+    normalized = normalized.slice(1);
+  }
+  const lastKey = normalized.length ? normalized[normalized.length - 1].id : null;
+  return { jobs: normalized, lastKey };
 }
 
 async function loadUsers() {
@@ -701,8 +1161,8 @@ async function loadUsers() {
   return users;
 }
 
-async function markApplied(userId, jobId) {
-  await db.ref(`applications/${userId}/${jobId}`).set({ appliedAt: Date.now() });
+async function markApplied(userId, jobId, data = {}) {
+  await db.ref(`applications/${userId}/${jobId}`).set({ appliedAt: Date.now(), ...data });
 }
 
 async function alreadyApplied(userId, jobId) {
@@ -716,44 +1176,159 @@ async function getApplicationsCount(userId) {
   return snap.numChildren();
 }
 
-async function runAutoApplyForUser(user) {
-  if (!user.autoApplyEnabled || !user.categories || !user.categories.length) return [];
+async function runAutoApplyForUser(user, opts = {}) {
+  if (!user.autoApplyEnabled) return { appliedJobs: [], diagnostics: { disabled: true } };
+  const dryRun = Boolean(opts.dryRun);
+  const startTime = Date.now();
+  const maxApply = Number.isFinite(opts.maxApply) ? opts.maxApply : MAX_APPLY_PER_RUN;
+  const maxMs = Number.isFinite(opts.maxMs) ? opts.maxMs : MAX_RUN_MS;
   const last = user.lastAutoApply || 0;
-  const jobs = await loadJobsSince(last);
-  const filtered = jobs.filter((j) => user.categories.includes(j.category));
   const appliedJobs = [];
+  const diagnostics = {
+    scanned: 0,
+    matched: 0,
+    missingEmail: 0,
+    alreadyApplied: 0,
+    skippedOld: 0,
+    missingProfile: 0,
+    sent: 0,
+    jobsWithEmbedding: 0,
+    jobsWithoutEmbedding: 0,
+    keywordOverlap: 0,
+    userKeywords: []
+  };
+  const userCtx = await ensureUserEmbedding(user);
+  const shouldUpdateStats =
+    opts.updateMatchStats === true;
 
-  for (const job of filtered) {
-    if (!job.email) continue;
-    const applied = await alreadyApplied(user.id, job.id);
-    if (applied) continue;
+  if (!userCtx.embedding) {
+    if (shouldUpdateStats) {
+      const stats = await computeMatchStatsForUser(user, { backfillEmbeddings: false });
+      await db.ref(`users/${user.id}/matchStats`).set({
+        ...stats,
+        updatedAt: Date.now(),
+        threshold: MATCH_THRESHOLD
+      });
+    }
+    return { appliedJobs: [], diagnostics };
+  }
 
-    const profile = {
-      ...user,
-      photoPath: user.photoPath,
-      cvPath: user.cvPath
-    };
-    await sendEmployerEmail({ job, userProfile: profile });
-    await markApplied(user.id, job.id);
-    appliedJobs.push(job);
+  const cutoff = opts.ignoreCutoff ? "" : (last ? new Date(last).toISOString() : "");
+  diagnostics.userKeywords = Array.from(userCtx.keywords || []).slice(0, 10);
+  let startAfter = null;
+  while (true) {
+    const { jobs, lastKey } = await loadJobsPage({ startAfter, limit: 200 });
+    if (!jobs.length) break;
+    for (const job of jobs) {
+      if (maxApply && appliedJobs.length >= maxApply) break;
+      if (Date.now() - startTime > maxMs - 1000) break;
+      diagnostics.scanned += 1;
+      if (cutoff && job.createdAt && job.createdAt < cutoff) {
+        diagnostics.skippedOld += 1;
+        continue;
+      }
+      if (!job.email) {
+        diagnostics.missingEmail += 1;
+        continue;
+      }
+      const applied = await alreadyApplied(user.id, job.id);
+      if (applied) {
+        diagnostics.alreadyApplied += 1;
+        continue;
+      }
+
+      const text = buildJobText(job);
+      const textHash = text ? hashText(text) : null;
+      const hasEmbedding =
+        Array.isArray(job?.embedding) &&
+        job.embedding.length > 0 &&
+        job.embeddingHash === textHash &&
+        job.embeddingModel === EMBEDDING_MODEL;
+      const jobEmbedding = dryRun ? (hasEmbedding ? job.embedding : null) : await ensureJobEmbedding(job, job.id);
+      if (jobEmbedding) {
+        diagnostics.jobsWithEmbedding += 1;
+      } else {
+        diagnostics.jobsWithoutEmbedding += 1;
+      }
+      const jobKeywords = extractKeywordHits(text);
+      if (jobKeywords.size && [...jobKeywords].some((kw) => userCtx.keywords.has(kw))) {
+        diagnostics.keywordOverlap += 1;
+      }
+      const score = scoreJobMatch({
+        userEmbedding: userCtx.embedding,
+        jobEmbedding,
+        userKeywords: userCtx.keywords,
+        jobKeywords,
+        userTitle: user.title,
+        jobTitle: job.title,
+        jobText: text
+      });
+      if (!score.match) continue;
+      diagnostics.matched += 1;
+
+      const profile = {
+        ...user,
+        photoPath: user.photoPath,
+        cvPath: user.cvPath
+      };
+      if (!profile.email || (!profile.cvPath && !profile.cvUrl)) {
+        diagnostics.missingProfile += 1;
+        continue;
+      }
+      if (!dryRun) {
+        await sendEmployerEmail({ job, userProfile: profile });
+        await markApplied(user.id, job.id, {
+          matchScore: Number(score.similarity.toFixed(4)),
+          keywordScore: Number(score.keywordScore.toFixed(4)),
+          matchKeywords: score.keywords
+        });
+        diagnostics.sent += 1;
+      }
+      appliedJobs.push(job);
+    }
+    if (maxApply && appliedJobs.length >= maxApply) break;
+    if (Date.now() - startTime > maxMs - 1000) break;
+    startAfter = lastKey;
+    if (!lastKey) break;
   }
 
   await db.ref(`users/${user.id}/lastAutoApply`).set(Date.now());
-  if (appliedJobs.length) {
-    const lifetimeTotal = await getApplicationsCount(user.id);
-    if (last === 0) {
-      await sendUserFirstEmail({ userProfile: user, jobs: appliedJobs });
-    } else {
-      await sendUserSummaryEmail({ userProfile: user, jobs: appliedJobs, lifetimeTotal });
-    }
+  if (shouldUpdateStats) {
+    const stats = await computeMatchStatsForUser(user);
+    await db.ref(`users/${user.id}/matchStats`).set({
+      ...stats,
+      updatedAt: Date.now(),
+      threshold: MATCH_THRESHOLD
+    });
   }
-  return appliedJobs;
+  if (!dryRun && appliedJobs.length) {
+    const lifetimeTotal = await getApplicationsCount(user.id);
+    await sendUserSummaryEmail({ userProfile: user, jobs: appliedJobs, lifetimeTotal });
+  }
+  return { appliedJobs, diagnostics };
 }
 
 export const runAutoApplyNow = onRequest(
-  { secrets: [SMTP_HOST, SMTP_USER, SMTP_PASS, MAIL_FROM] },
+  { secrets: [SMTP_HOST, SMTP_USER, SMTP_PASS, MAIL_FROM, OPENAI_API_KEY] },
   async (req, res) => {
+  const origin = req.get("origin") || "";
+  const allowed = new Set([
+    "https://mega-apply.web.app",
+    "https://mega-apply.firebaseapp.com",
+    "http://localhost:3000"
+  ]);
+  if (allowed.has(origin)) {
+    res.set("Access-Control-Allow-Origin", origin);
+    res.set("Vary", "Origin");
+  }
+  res.set("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
+    return;
+  }
   const { userId } = req.query;
+  const dryRun = String(req.query.dryRun || "") === "1";
   if (!userId) {
     res.status(400).send("Missing userId");
     return;
@@ -764,16 +1339,200 @@ export const runAutoApplyNow = onRequest(
     return;
   }
   const user = { id: userId, ...userSnap.val() };
-  const applied = await runAutoApplyForUser(user);
-  res.json({ applied: applied.length });
+  const result = await runAutoApplyForUser(user, { updateMatchStats: false, dryRun, ignoreCutoff: true });
+  res.json({
+    applied: result.appliedJobs.length,
+    capped: MAX_APPLY_PER_RUN,
+    timedOut: false,
+    diagnostics: result.diagnostics
+  });
 });
 
 export const dailyAutoApply = onSchedule(
-  { schedule: "every day 08:00", secrets: [SMTP_HOST, SMTP_USER, SMTP_PASS, MAIL_FROM] },
+  { schedule: "every day 08:00", secrets: [SMTP_HOST, SMTP_USER, SMTP_PASS, MAIL_FROM, OPENAI_API_KEY] },
   async () => {
     const users = await loadUsers();
     for (const user of users) {
-      await runAutoApplyForUser(user);
+      await runAutoApplyForUser(user, { updateMatchStats: false });
+    }
+  }
+);
+
+export const computeMatchStatsNow = onRequest(
+  { secrets: [OPENAI_API_KEY] },
+  async (req, res) => {
+    const origin = req.get("origin") || "";
+    const allowed = new Set([
+      "https://mega-apply.web.app",
+      "https://mega-apply.firebaseapp.com",
+      "http://localhost:3000"
+    ]);
+    if (allowed.has(origin)) {
+      res.set("Access-Control-Allow-Origin", origin);
+      res.set("Vary", "Origin");
+    }
+    res.set("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    if (req.method === "OPTIONS") {
+      res.status(204).send("");
+      return;
+    }
+
+    const { userId } = req.query;
+    if (!userId) {
+      res.status(400).send("Missing userId");
+      return;
+    }
+    const userSnap = await db.ref(`users/${userId}`).once("value");
+    if (!userSnap.exists()) {
+      res.status(404).send("User not found");
+      return;
+    }
+    const user = { id: userId, ...userSnap.val() };
+    try {
+      const stats = await computeMatchStatsForUser(user, { backfillEmbeddings: false });
+      await db.ref(`users/${userId}/matchStats`).set({
+        ...stats,
+        updatedAt: Date.now(),
+        threshold: MATCH_THRESHOLD
+      });
+      res.json({
+        ...stats,
+        updatedAt: Date.now(),
+        dbUrl: admin.app().options.databaseURL || null,
+        version: FUNCTIONS_VERSION
+      });
+    } catch (err) {
+      res.status(500).send(err?.message || "Failed to compute match stats");
+    }
+  }
+);
+
+export const diagnoseJobsNow = onRequest(
+  async (req, res) => {
+    const origin = req.get("origin") || "";
+    const allowed = new Set([
+      "https://mega-apply.web.app",
+      "https://mega-apply.firebaseapp.com",
+      "http://localhost:3000"
+    ]);
+    if (allowed.has(origin)) {
+      res.set("Access-Control-Allow-Origin", origin);
+      res.set("Vary", "Origin");
+    }
+    res.set("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    if (req.method === "OPTIONS") {
+      res.status(204).send("");
+      return;
+    }
+
+    const page1 = await loadJobsPage({ startAfter: null, limit: 200 });
+    const page2 = page1.lastKey
+      ? await loadJobsPage({ startAfter: page1.lastKey, limit: 200 })
+      : { jobs: [], lastKey: null, source: page1.source };
+    const firstKeysSnap = await db.ref("jobs").orderByKey().limitToFirst(5).once("value");
+    const lastKeysSnap = await db.ref("jobs").orderByKey().limitToLast(5).once("value");
+    const firstKeys = [];
+    const lastKeys = [];
+    firstKeysSnap.forEach((child) => firstKeys.push(child.key));
+    lastKeysSnap.forEach((child) => lastKeys.push(child.key));
+    res.json({
+      dbUrl: admin.app().options.databaseURL || null,
+      version: FUNCTIONS_VERSION,
+      page1Source: page1.source || "sdk",
+      page2Source: page2.source || "sdk",
+      firstKeys,
+      lastKeys,
+      page1Count: page1.jobs.length,
+      page1FirstKey: page1.jobs[0]?.id || null,
+      page1LastKey: page1.lastKey,
+      page2Count: page2.jobs.length,
+      page2FirstKey: page2.jobs[0]?.id || null,
+      page2LastKey: page2.lastKey
+    });
+  }
+);
+
+export const listJobs = onRequest(
+  {
+    cors: true,
+    timeoutSeconds: 60
+  },
+  async (req, res) => {
+    try {
+      const category = (req.query.category || "").toString().trim();
+      if (!category) return res.json({ jobs: [] });
+      const limit = Math.min(parseInt(req.query.limit || "60", 10) || 60, 200);
+      const snap = await db
+        .ref("jobs")
+        .orderByChild("category")
+        .equalTo(category)
+        .limitToFirst(limit)
+        .get();
+      const jobs = [];
+      snap.forEach((child) => {
+        const job = toPublicJob(child.key, child.val());
+        if (job && job.title) jobs.push(job);
+      });
+      return res.json({ jobs });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: "list_failed" });
+    }
+  }
+);
+
+export const getJobsByIds = onRequest(
+  {
+    cors: true,
+    timeoutSeconds: 60
+  },
+  async (req, res) => {
+    try {
+      const raw = (req.query.ids || "").toString();
+      const ids = raw
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, 200);
+      if (!ids.length) return res.json({ jobs: {} });
+      const jobs = {};
+      await Promise.all(
+        ids.map(async (id) => {
+          const snap = await db.ref("jobs").child(id).get();
+          if (!snap.exists()) return;
+          const job = toPublicJob(id, snap.val());
+          if (job) jobs[id] = job;
+        })
+      );
+      return res.json({ jobs });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: "fetch_failed" });
+    }
+  }
+);
+
+export const backfillJobEmbeddings = onRequest(
+  { secrets: [OPENAI_API_KEY, ADMIN_TOKEN] },
+  async (req, res) => {
+    const auth = requireAdminToken(req);
+    if (!auth.ok) {
+      res.status(auth.status).send(auth.message);
+      return;
+    }
+    const limit = Math.min(parseInt(req.query.limit || "250", 10) || 250, 500);
+    const startAfter = req.query.startAfter ? String(req.query.startAfter) : null;
+    try {
+      const result = await backfillJobEmbeddingsBatch({ startAfter, limit });
+      res.json({
+        ...result,
+        nextStartAfter: result.lastKey,
+        done: !result.lastKey || result.processed === 0
+      });
+    } catch (err) {
+      res.status(500).send(err?.message || "Backfill failed");
     }
   }
 );

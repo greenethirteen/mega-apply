@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import Head from "next/head";
 import { useRouter } from "next/router";
 import {
   createUserWithEmailAndPassword,
@@ -55,6 +56,9 @@ export default function Home() {
 
   return (
     <div className="container">
+      <Head>
+        <title>MegaApply™ — Auto Apply Engine</title>
+      </Head>
         <div className="header">
           <div className="logo" aria-label="MegaApply">
             <div className="logo-holo" aria-hidden="true" />
@@ -78,10 +82,10 @@ export default function Home() {
         <div className="hero-grid">
           <div className="hero-copy">
             <h2>Target higher‑paying <span style={{ color: "var(--accent)" }}>engineering</span> roles faster</h2>
-            <h1>Bulk Apply to 1,000+ Jobs in Saudi Arabia 🇸🇦</h1>
+            <h1>Bulk Apply to 2,000+ Jobs in Saudi Arabia 🇸🇦</h1>
             <p>
-              We’ll email every matching job & keep applying daily. MegaApply™
-              cleans listings, sends applications, and gives you a daily summary.
+              MegaApply™ passively auto applies to 100s of jobs daily. It cleans
+              listings, sends applications, and gives you a daily summary.
             </p>
             <div className="hero-actions">
               <button
@@ -108,6 +112,9 @@ export default function Home() {
               <span className="tag">Daily Auto‑Apply</span>
               <span className="tag">Email Summary</span>
             </div>
+            <p className="notice auto-callout" style={{ marginTop: 12 }}>
+              Passively auto apply to 100s of jobs daily while you focus on interviews.
+            </p>
           </div>
           <div className="hero-art">
             <div className="glass-card">
@@ -184,8 +191,8 @@ export default function Home() {
               </div>
               <div className="info-card">
                 <span className="info-badge yellow">Smart Match</span>
-                <h4>Category precision</h4>
-                <p>Only your top 2 categories are auto‑applied.</p>
+                <h4>Profile precision</h4>
+                <p>Only jobs that match your profile are auto‑applied.</p>
               </div>
               <div className="info-card">
                 <span className="info-badge pink">Hands‑Free</span>

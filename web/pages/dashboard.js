@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import Head from "next/head";
 import { useRouter } from "next/router";
 import {
   onAuthStateChanged,
@@ -21,6 +22,9 @@ import { CATEGORIES } from "../lib/categories.js";
 import { trackEvent } from "../lib/analytics.js";
 
 export default function Dashboard() {
+  const FUNCTIONS_BASE_URL =
+    process.env.NEXT_PUBLIC_FUNCTIONS_BASE_URL ||
+    "https://us-central1-mega-apply.cloudfunctions.net";
   const router = useRouter();
   const [auth, setAuth] = useState(null);
   const [db, setDb] = useState(null);
@@ -43,16 +47,27 @@ export default function Dashboard() {
   const [status, setStatus] = useState("");
   const [jobCounts, setJobCounts] = useState({ total: 0, byCategory: {} });
   const [jobsById, setJobsById] = useState({});
+  const [exploreJobs, setExploreJobs] = useState([]);
   const [applications, setApplications] = useState([]);
   const [isSyncingApps, setIsSyncingApps] = useState(false);
   const [lastRunAppliedCount, setLastRunAppliedCount] = useState(null);
-  const [autoApplyCategories, setAutoApplyCategories] = useState([]);
+  const [matchStats, setMatchStats] = useState(null);
+  const [isComputingMatches, setIsComputingMatches] = useState(false);
+  const [isMatchStatsLoading, setIsMatchStatsLoading] = useState(false);
   const [hasSavedProfile, setHasSavedProfile] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isProfileLoading, setIsProfileLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isAutoApplying, setIsAutoApplying] = useState(false);
   const [exploreCategory, setExploreCategory] = useState("");
+
+  useEffect(() => {
+    if (hasSavedProfile && !matchStats) {
+      setIsMatchStatsLoading(true);
+    } else {
+      setIsMatchStatsLoading(false);
+    }
+  }, [hasSavedProfile, matchStats]);
 
   function parseApplicationsSnapshot(snap) {
     if (!snap.exists()) return [];
@@ -85,7 +100,7 @@ export default function Dashboard() {
         setHasSavedProfile(true);
         setIsEditing(false);
         const saved = snap.val() || {};
-        setAutoApplyCategories(Array.isArray(saved.categories) ? saved.categories : []);
+        setMatchStats(saved.matchStats || null);
         setProfile({
           ...profile,
           ...saved,
@@ -95,7 +110,7 @@ export default function Dashboard() {
         setHasSavedProfile(false);
         setIsEditing(true);
         setProfile((p) => ({ ...p, email: u.email || "" }));
-        setAutoApplyCategories([]);
+        setMatchStats(null);
       }
       setIsProfileLoading(false);
     });
@@ -106,29 +121,9 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    if (!db) return;
-    const jobsRef = ref(db, "jobs");
-    const unsub = onValue(jobsRef, (snap) => {
-      if (!snap.exists()) {
-        setJobCounts({ total: 0, byCategory: {} });
-        setJobsById({});
-        return;
-      }
-      const byCategory = {};
-      let total = 0;
-      const map = {};
-      snap.forEach((child) => {
-        const job = child.val() || {};
-        const cat = job.category || "Uncategorized";
-        byCategory[cat] = (byCategory[cat] || 0) + 1;
-        total += 1;
-        map[child.key] = { id: child.key, ...job };
-      });
-      setJobCounts({ total, byCategory });
-      setJobsById(map);
-    });
-    return () => unsub();
-  }, [db]);
+    if (!matchStats?.totalJobs) return;
+    setJobCounts((prev) => ({ ...prev, total: matchStats.totalJobs }));
+  }, [matchStats]);
 
   useEffect(() => {
     if (!db || !user) return;
@@ -141,14 +136,45 @@ export default function Dashboard() {
 
   const categoryOptions = useMemo(() => CATEGORIES, []);
 
-  function toggleCategory(cat) {
-    setProfile((p) => {
-      const has = p.categories.includes(cat);
-      const next = has ? p.categories.filter((c) => c !== cat) : [...p.categories, cat];
-      if (next.length > 3) return p;
-      return { ...p, categories: next };
-    });
-  }
+  useEffect(() => {
+    if (!applications.length) {
+      setJobsById({});
+      return;
+    }
+    const ids = applications.map((a) => a.jobId).slice(0, 200);
+    const load = async () => {
+      try {
+        const res = await fetch(
+          `${FUNCTIONS_BASE_URL}/getJobsByIds?ids=${encodeURIComponent(ids.join(","))}`
+        );
+        const data = await res.json();
+        setJobsById(data.jobs || {});
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    load();
+  }, [applications, FUNCTIONS_BASE_URL]);
+
+  useEffect(() => {
+    if (!exploreCategory) {
+      setExploreJobs([]);
+      return;
+    }
+    const load = async () => {
+      try {
+        const res = await fetch(
+          `${FUNCTIONS_BASE_URL}/listJobs?category=${encodeURIComponent(exploreCategory)}&limit=60`
+        );
+        const data = await res.json();
+        setExploreJobs(Array.isArray(data.jobs) ? data.jobs : []);
+      } catch (err) {
+        console.error(err);
+        setExploreJobs([]);
+      }
+    };
+    load();
+  }, [exploreCategory, FUNCTIONS_BASE_URL]);
 
   async function uploadAsset(file, path) {
     if (!file || !user || !storage) return "";
@@ -202,8 +228,8 @@ export default function Dashboard() {
 
   async function startAutoApply() {
     if (!user || !db) return;
-    if (profile.categories.length === 0) {
-      setStatus("Please select up to two categories.");
+    if (!profile.title && !profile.bio) {
+      setStatus("Add your job title or summary so we can match jobs.");
       return;
     }
     setIsAutoApplying(true);
@@ -211,13 +237,11 @@ export default function Dashboard() {
     setLastRunAppliedCount(null);
     setStatus("Auto apply enabled.");
     try {
-      trackEvent("auto_apply_enabled", { categories: profile.categories });
+      trackEvent("auto_apply_enabled", { mode: "profile_match" });
       await update(ref(db, `users/${user.uid}`), {
-        categories: profile.categories,
         autoApplyEnabled: true,
         lastAutoApply: 0
       });
-      setAutoApplyCategories(profile.categories);
       const base = process.env.NEXT_PUBLIC_FUNCTIONS_BASE_URL || "";
       if (base) {
         try {
@@ -238,6 +262,31 @@ export default function Dashboard() {
     }
   }
 
+  async function computeMatches() {
+    if (!user || !db) return;
+    setIsComputingMatches(true);
+    setIsMatchStatsLoading(true);
+    setStatus("Calculating match stats...");
+    try {
+      const base = process.env.NEXT_PUBLIC_FUNCTIONS_BASE_URL || "";
+      if (base) {
+        const resp = await fetch(`${base}/computeMatchStatsNow?userId=${user.uid}`);
+        if (resp.ok) {
+          const data = await resp.json();
+          setMatchStats(data);
+        }
+      }
+      const snap = await get(ref(db, `users/${user.uid}`));
+      if (snap.exists()) {
+        setMatchStats(snap.val().matchStats || null);
+      }
+    } finally {
+      setIsComputingMatches(false);
+      setIsMatchStatsLoading(false);
+      setStatus("");
+    }
+  }
+
   async function pauseAutoApply() {
     if (!user || !db) return;
     setIsAutoApplying(true);
@@ -251,17 +300,7 @@ export default function Dashboard() {
     }
   }
 
-  const selectedCount = profile.categories.reduce(
-    (sum, cat) => sum + (jobCounts.byCategory[cat] || 0),
-    0
-  );
-  const exploreJobs = useMemo(() => {
-    if (!exploreCategory) return [];
-    return Object.values(jobsById)
-      .filter((job) => job.category === exploreCategory)
-      .map((job) => ({ id: job.id, title: job.title }))
-      .filter((job) => job.title);
-  }, [exploreCategory, jobsById]);
+  const exploreJobsView = useMemo(() => exploreJobs, [exploreJobs]);
   const applicationsToday = useMemo(() => {
     if (!applications.length) return 0;
     const start = new Date();
@@ -290,6 +329,9 @@ export default function Dashboard() {
 
   return (
     <div className="container">
+      <Head>
+        <title>MegaApply™ Dashboard</title>
+      </Head>
       <div className="header">
         <div className="logo" aria-label="MegaApply">
           <div className="logo-holo" aria-hidden="true" />
@@ -299,7 +341,6 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="actions">
-          <a className="tag" href="/">Home</a>
           {auth && <button className="btn secondary" onClick={() => signOut(auth)}>Sign out</button>}
         </div>
       </div>
@@ -312,41 +353,57 @@ export default function Dashboard() {
           <p className="dash-kicker">
             TARGET HIGHER‑PAYING <span>ENGINEERING</span> ROLES FASTER
           </p>
-          <h1>Bulk Apply to 1,000+ Jobs in Saudi Arabia 🇸🇦</h1>
+          <h1>Bulk Apply to 2,000+ Jobs in Saudi Arabia 🇸🇦</h1>
           <div className="dash-tags">
             <span className="tag">AI‑Cleaned Listings</span>
             <span className="tag">Daily Auto‑Apply</span>
             <span className="tag">Proof of Work Emails</span>
           </div>
+          <p className="notice auto-callout" style={{ marginTop: 12 }}>
+            Passively auto apply to 100s of jobs daily while you focus on interviews.
+          </p>
         </div>
       </section>
 
       <div className="split">
         <div className="card hero">
-          <h2>Select up to 3 categories</h2>
-          <p className="notice">Choose your focus areas. We auto‑apply to every new job in your picks.</p>
+          <h2>Profile matching</h2>
+          <p className="notice">
+            We match jobs to your title and summary, then auto‑apply only to good fits.
+          </p>
           <div className="stats">
             <div className="stat">
               <div className="label">Total jobs in database</div>
               <div className="value">{jobCounts.total}</div>
             </div>
             <div className="stat">
-              <div className="label">Jobs in selected categories</div>
-              <div className="value">{selectedCount}</div>
+              <div className="label">Jobs matching your profile</div>
+              <div className="value">{matchStats?.matchingJobs ?? "—"}</div>
             </div>
           </div>
-          <div className="actions" style={{ marginTop: 18, flexWrap: "wrap" }}>
-            {categoryOptions.map((cat) => (
-              <button
-                key={cat}
-                type="button"
-                className={`pill ${profile.categories.includes(cat) ? "active" : ""}`}
-                onClick={() => toggleCategory(cat)}
-                title={`${jobCounts.byCategory[cat] || 0} jobs`}
-              >
-                {cat} · {jobCounts.byCategory[cat] || 0}
-              </button>
-            ))}
+          {(isMatchStatsLoading || isComputingMatches) && (
+            <div style={{ marginTop: 12 }}>
+              <div className="loading-bar compact" aria-hidden="true">
+                <span />
+              </div>
+              <p className="notice" style={{ marginTop: 6 }}>
+                Matching jobs is loading. Please wait…
+              </p>
+            </div>
+          )}
+          <p className="notice" style={{ marginTop: 12 }}>
+            {matchStats?.updatedAt
+              ? `Match stats updated ${new Date(matchStats.updatedAt).toLocaleString()}`
+              : "Run auto apply to calculate your match stats."}
+          </p>
+          <div className="actions" style={{ marginTop: 12 }}>
+            <button
+              className={`btn ghost pressable ${isComputingMatches ? "loading" : ""}`}
+              onClick={computeMatches}
+              disabled={isComputingMatches}
+            >
+              {isComputingMatches ? "Calculating..." : "Compute matches"}
+            </button>
           </div>
           <div className="actions" style={{ marginTop: 20 }}>
             <button
@@ -367,9 +424,6 @@ export default function Dashboard() {
             </button>
             <span className="tag">{profile.autoApplyEnabled ? "Auto apply is ON" : "Auto apply is OFF"}</span>
           </div>
-          <p className="notice" style={{ marginTop: 10 }}>
-            Daily auto-apply categories: {profile.autoApplyEnabled && autoApplyCategories.length ? autoApplyCategories.join(", ") : "None"}
-          </p>
           {isAutoApplying && (
             <div className="loading-bar compact" aria-hidden="true">
               <span />
@@ -515,17 +569,17 @@ export default function Dashboard() {
                 <option value="">Select category</option>
                 {categoryOptions.map((cat) => (
                   <option key={cat} value={cat}>
-                    {cat} ({jobCounts.byCategory[cat] || 0})
+                    {cat}
                   </option>
                 ))}
               </select>
             </div>
             <div className="scroll" style={{ marginTop: 12 }}>
               {!exploreCategory && <div className="notice">Choose a category to see jobs.</div>}
-              {exploreCategory && exploreJobs.length === 0 && (
+              {exploreCategory && exploreJobsView.length === 0 && (
                 <div className="notice">No jobs found for this category.</div>
               )}
-            {exploreJobs.map((job) => (
+            {exploreJobsView.map((job) => (
               <div className="job-row" key={job.id}>
                 <div className="job-title">{formatTitleDisplay(job.title)}</div>
               </div>
