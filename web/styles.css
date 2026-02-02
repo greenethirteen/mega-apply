@@ -915,6 +915,25 @@ a { color: inherit; text-decoration: none; }
   margin-bottom: 10px;
 }
 
+.billing-modal .job-modal-body {
+  max-height: none;
+}
+
+.billing-copy {
+  font-size: 15px;
+  color: var(--ink);
+  font-weight: 700;
+  line-height: 1.6;
+  margin-bottom: 10px;
+}
+
+.billing-meta {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
 .profile-gate-missing {
   font-size: 13px;
   color: var(--muted);

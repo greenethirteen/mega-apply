@@ -4,6 +4,7 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret } from "firebase-functions/params";
 import nodemailer from "nodemailer";
 import crypto from "node:crypto";
+import Stripe from "stripe";
 
 admin.initializeApp({
   databaseURL: "https://mega-apply-default-rtdb.firebaseio.com",
@@ -19,6 +20,9 @@ const SMTP_USER = defineSecret("SMTP_USER");
 const SMTP_PASS = defineSecret("SMTP_PASS");
 const MAIL_FROM = defineSecret("MAIL_FROM");
 const ADMIN_TOKEN = defineSecret("ADMIN_TOKEN");
+const STRIPE_SECRET_KEY = defineSecret("STRIPE_SECRET_KEY");
+const STRIPE_WEBHOOK_SECRET = defineSecret("STRIPE_WEBHOOK_SECRET");
+const STRIPE_PRICE_ID = defineSecret("STRIPE_PRICE_ID");
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const FUNCTIONS_VERSION = "2026-01-31-1";
 const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || "text-embedding-3-small";
@@ -31,12 +35,23 @@ const MAX_RUN_MS = parseInt(process.env.MAX_RUN_MS || "45000", 10);
 const MAX_MATCH_STATS_MS = parseInt(process.env.MAX_MATCH_STATS_MS || "45000", 10);
 const SAUDI_PAGES = parseInt(process.env.SAUDI_PAGES || "1", 10);
 const MIN_DESCRIPTION_LEN = parseInt(process.env.MIN_DESCRIPTION_LEN || "120", 10);
+const FREE_APPLY_LIMIT = parseInt(process.env.FREE_APPLY_LIMIT || "50", 10);
 
 const ALLOWED_ORIGINS = new Set([
   "https://mega-apply.web.app",
   "https://mega-apply.firebaseapp.com",
   "http://localhost:3000"
 ]);
+
+let stripeClient = null;
+function getStripe() {
+  if (!stripeClient) {
+    stripeClient = new Stripe(STRIPE_SECRET_KEY.value(), {
+      apiVersion: "2024-06-20"
+    });
+  }
+  return stripeClient;
+}
 
 function applyCors(req, res) {
   const origin = req.get("origin") || "";
@@ -51,6 +66,52 @@ function applyCors(req, res) {
     return true;
   }
   return false;
+}
+
+function isUserSubscribed(user) {
+  const status = user?.subscription?.status || "";
+  return status === "active" || status === "trialing";
+}
+
+async function updateUserSubscription(userId, data) {
+  if (!userId) return;
+  await db.ref(`users/${userId}/subscription`).update({
+    ...data,
+    updatedAt: Date.now()
+  });
+}
+
+async function mapStripeCustomer(customerId, userId) {
+  if (!customerId || !userId) return;
+  await db.ref(`stripeCustomers/${customerId}`).set({
+    userId,
+    updatedAt: Date.now()
+  });
+}
+
+async function mapStripeSubscription(subscriptionId, userId, customerId) {
+  if (!subscriptionId || !userId) return;
+  await db.ref(`stripeSubscriptions/${subscriptionId}`).set({
+    userId,
+    customerId: customerId || null,
+    updatedAt: Date.now()
+  });
+}
+
+async function getUserIdForStripeCustomer(customerId) {
+  if (!customerId) return null;
+  const snap = await db.ref(`stripeCustomers/${customerId}`).once("value");
+  return snap.exists() ? snap.val().userId || null : null;
+}
+
+async function getUserIdForStripeSubscription(subscriptionId) {
+  if (!subscriptionId) return null;
+  const snap = await db.ref(`stripeSubscriptions/${subscriptionId}`).once("value");
+  return snap.exists() ? snap.val().userId || null : null;
+}
+
+function getRequestOrigin(req) {
+  return req.get("origin") || "https://mega-apply.web.app";
 }
 
 function toPublicJob(id, job) {
@@ -1204,7 +1265,7 @@ async function runAutoApplyForUser(user, opts = {}) {
   if (!user.autoApplyEnabled) return { appliedJobs: [], diagnostics: { disabled: true } };
   const dryRun = Boolean(opts.dryRun);
   const startTime = Date.now();
-  const maxApply = Number.isFinite(opts.maxApply) ? opts.maxApply : MAX_APPLY_PER_RUN;
+  let maxApply = Number.isFinite(opts.maxApply) ? opts.maxApply : MAX_APPLY_PER_RUN;
   const maxMs = Number.isFinite(opts.maxMs) ? opts.maxMs : MAX_RUN_MS;
   const last = user.lastAutoApply || 0;
   const appliedJobs = [];
@@ -1219,8 +1280,22 @@ async function runAutoApplyForUser(user, opts = {}) {
     jobsWithEmbedding: 0,
     jobsWithoutEmbedding: 0,
     keywordOverlap: 0,
-    userKeywords: []
+    userKeywords: [],
+    freeLimit: FREE_APPLY_LIMIT
   };
+  const subscribed = isUserSubscribed(user);
+  if (!subscribed) {
+    const lifetimeApplied = await getApplicationsCount(user.id);
+    const remaining = FREE_APPLY_LIMIT - lifetimeApplied;
+    diagnostics.lifetimeApplied = lifetimeApplied;
+    diagnostics.remaining = Math.max(0, remaining);
+    if (remaining <= 0) {
+      diagnostics.blocked = true;
+      diagnostics.blockedReason = "free_limit_reached";
+      return { appliedJobs: [], diagnostics };
+    }
+    maxApply = Math.min(maxApply, remaining);
+  }
   const userCtx = await ensureUserEmbedding(user);
   const shouldUpdateStats =
     opts.updateMatchStats === true;
@@ -1353,9 +1428,193 @@ export const runAutoApplyNow = onRequest(
     applied: result.appliedJobs.length,
     capped: MAX_APPLY_PER_RUN,
     timedOut: false,
-    diagnostics: result.diagnostics
+    diagnostics: result.diagnostics,
+    blocked: Boolean(result.diagnostics?.blocked),
+    remaining: Number.isFinite(result.diagnostics?.remaining) ? result.diagnostics.remaining : null,
+    freeLimit: result.diagnostics?.freeLimit ?? FREE_APPLY_LIMIT
   });
 });
+
+export const createCheckoutSession = onRequest(
+  { secrets: [STRIPE_SECRET_KEY, STRIPE_PRICE_ID] },
+  async (req, res) => {
+    if (applyCors(req, res)) return;
+    if (req.method !== "POST" && req.method !== "GET") {
+      res.status(405).send("Method not allowed");
+      return;
+    }
+    let body = {};
+    if (typeof req.body === "string") {
+      try {
+        body = JSON.parse(req.body || "{}");
+      } catch {
+        body = {};
+      }
+    } else {
+      body = req.body || {};
+    }
+    const userId = String(req.query.userId || body.userId || "").trim();
+    if (!userId) {
+      res.status(400).json({ error: "missing_user" });
+      return;
+    }
+    const userSnap = await db.ref(`users/${userId}`).once("value");
+    if (!userSnap.exists()) {
+      res.status(404).json({ error: "user_not_found" });
+      return;
+    }
+    const user = { id: userId, ...userSnap.val() };
+    if (isUserSubscribed(user)) {
+      res.json({ alreadySubscribed: true });
+      return;
+    }
+    const stripe = getStripe();
+    const origin = getRequestOrigin(req);
+    const successUrl = body.successUrl || `${origin}/dashboard?subscribed=1`;
+    const cancelUrl = body.cancelUrl || `${origin}/dashboard?billing=cancel`;
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      customer_email: user.email || undefined,
+      client_reference_id: userId,
+      line_items: [{ price: STRIPE_PRICE_ID.value(), quantity: 1 }],
+      allow_promotion_codes: true,
+      metadata: { userId },
+      subscription_data: { metadata: { userId } },
+      success_url: successUrl,
+      cancel_url: cancelUrl
+    });
+    await updateUserSubscription(userId, { status: "incomplete" });
+    res.json({ url: session.url });
+  }
+);
+
+export const createBillingPortalSession = onRequest(
+  { secrets: [STRIPE_SECRET_KEY] },
+  async (req, res) => {
+    if (applyCors(req, res)) return;
+    if (req.method !== "POST" && req.method !== "GET") {
+      res.status(405).send("Method not allowed");
+      return;
+    }
+    let body = {};
+    if (typeof req.body === "string") {
+      try {
+        body = JSON.parse(req.body || "{}");
+      } catch {
+        body = {};
+      }
+    } else {
+      body = req.body || {};
+    }
+    const userId = String(req.query.userId || body.userId || "").trim();
+    if (!userId) {
+      res.status(400).json({ error: "missing_user" });
+      return;
+    }
+    const userSnap = await db.ref(`users/${userId}`).once("value");
+    if (!userSnap.exists()) {
+      res.status(404).json({ error: "user_not_found" });
+      return;
+    }
+    const user = { id: userId, ...userSnap.val() };
+    const customerId = user?.subscription?.customerId || null;
+    if (!customerId) {
+      res.status(400).json({ error: "missing_customer" });
+      return;
+    }
+    const stripe = getStripe();
+    const origin = getRequestOrigin(req);
+    const returnUrl = body.returnUrl || `${origin}/dashboard?billing=1`;
+    const session = await stripe.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: returnUrl
+    });
+    res.json({ url: session.url });
+  }
+);
+
+export const stripeWebhook = onRequest(
+  { secrets: [STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET] },
+  async (req, res) => {
+    const sig = req.get("stripe-signature");
+    let event;
+    try {
+      event = getStripe().webhooks.constructEvent(
+        req.rawBody,
+        sig,
+        STRIPE_WEBHOOK_SECRET.value()
+      );
+    } catch (err) {
+      res.status(400).send(`Webhook Error: ${err.message}`);
+      return;
+    }
+
+    try {
+      if (event.type === "checkout.session.completed") {
+        const session = event.data.object;
+        const subscriptionId = session.subscription || null;
+        const customerId = session.customer || null;
+        let userId = session.metadata?.userId || session.client_reference_id || null;
+        if (!userId && subscriptionId) {
+          userId = await getUserIdForStripeSubscription(subscriptionId);
+        }
+        if (!userId && customerId) {
+          userId = await getUserIdForStripeCustomer(customerId);
+        }
+        if (userId) {
+          let status = "active";
+          let currentPeriodEnd = null;
+          if (subscriptionId) {
+            const subscription = await getStripe().subscriptions.retrieve(subscriptionId);
+            status = subscription.status;
+            currentPeriodEnd = subscription.current_period_end
+              ? subscription.current_period_end * 1000
+              : null;
+          }
+          await updateUserSubscription(userId, {
+            status,
+            customerId,
+            subscriptionId,
+            currentPeriodEnd
+          });
+          if (customerId) await mapStripeCustomer(customerId, userId);
+          if (subscriptionId) await mapStripeSubscription(subscriptionId, userId, customerId);
+        }
+      }
+
+      if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") {
+        const subscription = event.data.object;
+        const subscriptionId = subscription.id;
+        const customerId = subscription.customer || null;
+        let userId = subscription.metadata?.userId || null;
+        if (!userId) {
+          userId = await getUserIdForStripeSubscription(subscriptionId);
+        }
+        if (!userId && customerId) {
+          userId = await getUserIdForStripeCustomer(customerId);
+        }
+        if (userId) {
+          await updateUserSubscription(userId, {
+            status: subscription.status,
+            customerId,
+            subscriptionId,
+            currentPeriodEnd: subscription.current_period_end
+              ? subscription.current_period_end * 1000
+              : null
+          });
+          if (customerId) await mapStripeCustomer(customerId, userId);
+          if (subscriptionId) await mapStripeSubscription(subscriptionId, userId, customerId);
+        }
+      }
+    } catch (err) {
+      console.error("Stripe webhook handler failed", err);
+      res.status(500).send("Webhook handler failed");
+      return;
+    }
+
+    res.json({ received: true });
+  }
+);
 
 export const dailyAutoApply = onSchedule(
   { schedule: "every day 08:00", secrets: [SMTP_HOST, SMTP_USER, SMTP_PASS, MAIL_FROM, OPENAI_API_KEY] },

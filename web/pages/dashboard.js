@@ -63,6 +63,9 @@ export default function Dashboard() {
   const [activeJob, setActiveJob] = useState(null);
   const [showProfilePrompt, setShowProfilePrompt] = useState(false);
   const [missingProfileFields, setMissingProfileFields] = useState([]);
+  const [showSubscribeModal, setShowSubscribeModal] = useState(false);
+  const [isSubscribing, setIsSubscribing] = useState(false);
+  const FREE_APPLY_LIMIT = 50;
 
   function formatDescriptionSnippet(text, maxLen = 110) {
     if (!text) return "";
@@ -261,6 +264,11 @@ export default function Dashboard() {
       setStatus("Complete your profile to start auto apply.");
       return;
     }
+    if (!isSubscribed && applications.length >= FREE_APPLY_LIMIT) {
+      setShowSubscribeModal(true);
+      setStatus("Free limit reached. Subscribe to continue auto applying.");
+      return;
+    }
     setIsAutoApplying(true);
     setIsSyncingApps(true);
     setLastRunAppliedCount(null);
@@ -279,6 +287,9 @@ export default function Dashboard() {
             const json = await resp.json();
             if (typeof json.applied === "number") {
               setLastRunAppliedCount(json.applied);
+            }
+            if (json?.blocked) {
+              setShowSubscribeModal(true);
             }
           }
           const snap = await get(ref(db, `applications/${user.uid}`));
@@ -329,6 +340,54 @@ export default function Dashboard() {
     }
   }
 
+  async function startSubscriptionCheckout() {
+    if (!user) return;
+    setIsSubscribing(true);
+    setStatus("Redirecting to Stripe...");
+    try {
+      const base = process.env.NEXT_PUBLIC_FUNCTIONS_BASE_URL || "";
+      const resp = await fetch(`${base}/createCheckoutSession`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: user.uid })
+      });
+      const data = await resp.json();
+      if (data?.url) {
+        window.location.href = data.url;
+        return;
+      }
+      setStatus("Unable to start subscription.");
+    } catch (err) {
+      setStatus(err?.message || "Unable to start subscription.");
+    } finally {
+      setIsSubscribing(false);
+    }
+  }
+
+  async function openBillingPortal() {
+    if (!user) return;
+    setIsSubscribing(true);
+    setStatus("Opening billing portal...");
+    try {
+      const base = process.env.NEXT_PUBLIC_FUNCTIONS_BASE_URL || "";
+      const resp = await fetch(`${base}/createBillingPortalSession`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: user.uid })
+      });
+      const data = await resp.json();
+      if (data?.url) {
+        window.location.href = data.url;
+        return;
+      }
+      setStatus("Unable to open billing portal.");
+    } catch (err) {
+      setStatus(err?.message || "Unable to open billing portal.");
+    } finally {
+      setIsSubscribing(false);
+    }
+  }
+
   const exploreJobsView = useMemo(() => exploreJobs, [exploreJobs]);
   const applicationsToday = useMemo(() => {
     if (!applications.length) return 0;
@@ -337,6 +396,15 @@ export default function Dashboard() {
     const startMs = start.getTime();
     return applications.filter((app) => (app.appliedAt || 0) >= startMs).length;
   }, [applications]);
+  const subscriptionStatus = profile?.subscription?.status || "";
+  const isSubscribed = subscriptionStatus === "active" || subscriptionStatus === "trialing";
+  const freeRemaining = Math.max(0, FREE_APPLY_LIMIT - applications.length);
+
+  useEffect(() => {
+    if (!isSubscribed && applications.length >= FREE_APPLY_LIMIT) {
+      setShowSubscribeModal(true);
+    }
+  }, [applications.length, isSubscribed]);
 
   function formatTitleDisplay(title) {
     if (!title) return "";
@@ -438,7 +506,12 @@ export default function Dashboard() {
             <button
               className={`btn pressable ${isAutoApplying ? "loading" : ""}`}
               onClick={startAutoApply}
-              disabled={isAutoApplying}
+              disabled={isAutoApplying || (!isSubscribed && freeRemaining <= 0)}
+              title={
+                !isSubscribed && freeRemaining <= 0
+                  ? "Subscribe to keep auto applying"
+                  : ""
+              }
             >
               {isAutoApplying ? "Starting..." : "Start Auto Apply"}
             </button>
@@ -452,6 +525,16 @@ export default function Dashboard() {
               Pause
             </button>
             <span className="tag">{profile.autoApplyEnabled ? "Auto apply is ON" : "Auto apply is OFF"}</span>
+            {isSubscribed && (
+              <button
+                className="btn ghost pressable"
+                type="button"
+                onClick={openBillingPortal}
+                disabled={isSubscribing}
+              >
+                Manage billing
+              </button>
+            )}
           </div>
           {isAutoApplying && (
             <div className="loading-bar compact" aria-hidden="true">
@@ -466,6 +549,9 @@ export default function Dashboard() {
               Total applications: {applications.length} · Sent today: {applicationsToday}
               {typeof lastRunAppliedCount === "number" ? ` · Last run: ${lastRunAppliedCount}` : ""}
               {isSyncingApps ? " · Syncing…" : ""}
+              {isSubscribed
+                ? " · Plan: Unlimited"
+                : ` · Free applies left: ${freeRemaining}`}
             </p>
             <div className="scroll">
               {applications.length === 0 && (
@@ -571,6 +657,55 @@ export default function Dashboard() {
                       className="btn ghost"
                       type="button"
                       onClick={() => setShowProfilePrompt(false)}
+                    >
+                      Not now
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showSubscribeModal && !isSubscribed && (
+            <div
+              className="job-modal-overlay"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Subscribe to continue auto apply"
+              onClick={() => setShowSubscribeModal(false)}
+            >
+              <div className="job-modal billing-modal" onClick={(event) => event.stopPropagation()}>
+                <div className="job-modal-header">
+                  <div className="job-modal-title">You’ve hit the free limit</div>
+                  <button
+                    className="btn ghost"
+                    type="button"
+                    onClick={() => setShowSubscribeModal(false)}
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="job-modal-body">
+                  <p className="billing-copy">
+                    You can auto‑apply to 50 jobs for free. Subscribe for $5/month to unlock
+                    unlimited applications and keep daily auto‑apply running.
+                  </p>
+                  <div className="billing-meta">
+                    Free applies used: {applications.length} / {FREE_APPLY_LIMIT}
+                  </div>
+                  <div className="profile-gate-actions">
+                    <button
+                      className={`btn pressable ${isSubscribing ? "loading" : ""}`}
+                      type="button"
+                      onClick={startSubscriptionCheckout}
+                      disabled={isSubscribing}
+                    >
+                      {isSubscribing ? "Redirecting..." : "Subscribe $5/month"}
+                    </button>
+                    <button
+                      className="btn ghost"
+                      type="button"
+                      onClick={() => setShowSubscribeModal(false)}
                     >
                       Not now
                     </button>
