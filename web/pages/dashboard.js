@@ -450,9 +450,8 @@ export default function Dashboard() {
           <p className="dash-kicker">
             TARGET HIGHER‑PAYING <span>ENGINEERING</span> ROLES FASTER
           </p>
-          <h1>Bulk Apply to 2,000+ Jobs in Saudi Arabia 🇸🇦</h1>
+          <h1>Bulk Apply to 3,000+ Jobs in Saudi Arabia 🇸🇦</h1>
           <div className="dash-tags">
-            <span className="tag">AI‑Cleaned Listings</span>
             <span className="tag">Daily Auto‑Apply</span>
             <span className="tag">Proof of Work Emails</span>
           </div>

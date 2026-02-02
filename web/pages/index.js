@@ -23,6 +23,7 @@ export default function Home() {
   const [demoFeed, setDemoFeed] = useState([]);
   const [demoHold, setDemoHold] = useState(false);
   const demoIndexRef = useRef(0);
+  const [pricingPlan, setPricingPlan] = useState("trial");
 
   const demoJobs = [
     { title: "Senior Electrical Engineer", company: "Gulf Energy", location: "Riyadh", category: "Electrical" },
@@ -116,7 +117,7 @@ export default function Home() {
             <h2>Target higher‑paying <span style={{ color: "var(--accent)" }}>engineering</span> roles faster</h2>
             <h1>Bulk Apply to 3,000+ Jobs in Saudi Arabia 🇸🇦</h1>
             <p>
-              MegaApply™ matches you only to roles where you’re a top fit, cleans listings,
+              MegaApply™ matches you only to roles where you’re a top fit,
               and auto-applies in the background while you interview.
             </p>
             <div className="hero-actions">
@@ -140,7 +141,6 @@ export default function Home() {
               </button>
             </div>
             <div className="hero-tags">
-              <span className="tag">AI‑Cleaned Listings</span>
               <span className="tag">Top‑Match Targeting</span>
               <span className="tag">Always‑On Auto‑Apply</span>
             </div>
@@ -149,15 +149,6 @@ export default function Home() {
             </p>
           </div>
           <div className="hero-art">
-            <div className="glass-card">
-              <div className="glass-title">Categories in Focus</div>
-              <div className="pill-grid">
-                <span className="pill active">Electrical</span>
-                <span className="pill active">HSE</span>
-                <span className="pill">Planning</span>
-                <span className="pill">Mechanical</span>
-              </div>
-            </div>
             <div
               className="glass-card auto-apply-demo"
               onMouseEnter={() => setDemoHold(true)}
@@ -179,7 +170,96 @@ export default function Home() {
                 ))}
               </div>
             </div>
+            <div className="glass-card">
+              <div className="glass-title">Categories in Focus</div>
+              <div className="pill-grid">
+                <span className="pill active">Electrical</span>
+                <span className="pill active">HSE</span>
+                <span className="pill">Planning</span>
+                <span className="pill">Mechanical</span>
+              </div>
+            </div>
           </div>
+        </div>
+      </section>
+
+      <section className="pricing">
+        <div className="pricing-header">
+          <div className="badge">Simple pricing</div>
+          <p className="pricing-headline">
+            Start free, then go unlimited — 50 auto‑applies free, then $5/month.
+          </p>
+        </div>
+        <div className="pricing-toggle-wrap">
+          <div className="pricing-toggle" role="tablist" aria-label="Pricing switch">
+            <button
+              className={`pricing-tab ${pricingPlan === "trial" ? "active" : ""}`}
+              type="button"
+              onClick={() => setPricingPlan("trial")}
+              role="tab"
+              aria-selected={pricingPlan === "trial"}
+            >
+              Free Trial
+            </button>
+            <button
+              className={`pricing-tab ${pricingPlan === "unlimited" ? "active" : ""}`}
+              type="button"
+              onClick={() => setPricingPlan("unlimited")}
+              role="tab"
+              aria-selected={pricingPlan === "unlimited"}
+            >
+              Unlimited
+            </button>
+          </div>
+        </div>
+        <div className={`pricing-card compact ${pricingPlan === "unlimited" ? "pro" : "free"}`}>
+          {pricingPlan === "unlimited" && <div className="pricing-tag">Most popular</div>}
+          <div className="pricing-top">
+            <div>
+              <div className="pricing-title">
+                {pricingPlan === "unlimited" ? "Unlimited Plan" : "Free Trial"}
+              </div>
+              <p className="notice">
+                {pricingPlan === "unlimited"
+                  ? "Always‑on auto‑apply with full access"
+                  : "Perfect for testing MegaApply™"}
+              </p>
+            </div>
+            <div className="pricing-price">
+              <span className="pricing-amount">
+                {pricingPlan === "unlimited" ? "$5" : "$0"}
+              </span>
+              <span className="pricing-cycle">
+                {pricingPlan === "unlimited" ? "/month" : "/once"}
+              </span>
+            </div>
+          </div>
+          <ul className="pricing-list">
+            {pricingPlan === "unlimited" ? (
+              <>
+                <li>Unlimited applications</li>
+                <li>Priority matching engine</li>
+                <li>Daily proof‑of‑work digest</li>
+                <li>Cancel anytime</li>
+              </>
+            ) : (
+              <>
+                <li>50 auto‑applied jobs</li>
+                <li>Top‑match targeting</li>
+                <li>Daily summary email</li>
+                <li>Upgrade anytime</li>
+              </>
+            )}
+          </ul>
+          <button
+            className={`btn ${pricingPlan === "unlimited" ? "" : "secondary"}`}
+            onClick={() => {
+              setMode("signup");
+              authSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+          >
+            {pricingPlan === "unlimited" ? "Go unlimited" : "Start free"}
+          </button>
         </div>
       </section>
 
