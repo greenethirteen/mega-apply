@@ -32,11 +32,33 @@ const MAX_MATCH_STATS_MS = parseInt(process.env.MAX_MATCH_STATS_MS || "45000", 1
 const SAUDI_PAGES = parseInt(process.env.SAUDI_PAGES || "1", 10);
 const MIN_DESCRIPTION_LEN = parseInt(process.env.MIN_DESCRIPTION_LEN || "120", 10);
 
+const ALLOWED_ORIGINS = new Set([
+  "https://mega-apply.web.app",
+  "https://mega-apply.firebaseapp.com",
+  "http://localhost:3000"
+]);
+
+function applyCors(req, res) {
+  const origin = req.get("origin") || "";
+  if (ALLOWED_ORIGINS.has(origin)) {
+    res.set("Access-Control-Allow-Origin", origin);
+    res.set("Vary", "Origin");
+  }
+  res.set("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
+    return true;
+  }
+  return false;
+}
+
 function toPublicJob(id, job) {
   if (!job) return null;
   return {
     id,
     title: job.title || "",
+    description: job.description || "",
     category: job.category || "Uncategorized",
     location: job.location || "",
     createdAt: job.createdAt || "",
@@ -1063,6 +1085,7 @@ async function sendUserSummaryEmail({ userProfile, jobs, lifetimeTotal = 0 }) {
   const transporter = mailer();
   const total = jobs.length;
   const photoUrl = userProfile.photoUrl || "";
+  const titleSkill = userProfile.title ? userProfile.title : "your role";
 
   const contentHtml = `
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
@@ -1077,6 +1100,7 @@ async function sendUserSummaryEmail({ userProfile, jobs, lifetimeTotal = 0 }) {
           </div>
           <div style="font-size:22px;font-weight:900;color:#1f2333;letter-spacing:.2px;margin-top:12px;">${userProfile.name || "Your Profile"}</div>
           <div style="font-size:14px;color:#5d667b;margin-top:4px;font-weight:700;">${userProfile.title || "Job Seeker"}</div>
+          <div style="margin-top:10px;font-size:14px;color:#2f3640;font-weight:700;line-height:1.5;">We applied to roles where your ${titleSkill} skills are in high demand.</div>
           <div style="margin-top:12px;">
             <span style="display:inline-block;margin:4px;padding:8px 12px;border-radius:999px;background:#eef2ff;border:1px solid #d7def3;color:#55607a;font-size:13px;font-weight:700;letter-spacing:.2px;">Daily total</span>
             <span style="display:inline-block;margin:4px;padding:10px 16px;border-radius:999px;background:#ffd9a0;color:#3a2600;font-size:16px;font-weight:900;letter-spacing:.2px;">${total} applications</span>
@@ -1311,22 +1335,7 @@ async function runAutoApplyForUser(user, opts = {}) {
 export const runAutoApplyNow = onRequest(
   { secrets: [SMTP_HOST, SMTP_USER, SMTP_PASS, MAIL_FROM, OPENAI_API_KEY] },
   async (req, res) => {
-  const origin = req.get("origin") || "";
-  const allowed = new Set([
-    "https://mega-apply.web.app",
-    "https://mega-apply.firebaseapp.com",
-    "http://localhost:3000"
-  ]);
-  if (allowed.has(origin)) {
-    res.set("Access-Control-Allow-Origin", origin);
-    res.set("Vary", "Origin");
-  }
-  res.set("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  if (req.method === "OPTIONS") {
-    res.status(204).send("");
-    return;
-  }
+  if (applyCors(req, res)) return;
   const { userId } = req.query;
   const dryRun = String(req.query.dryRun || "") === "1";
   if (!userId) {
@@ -1361,22 +1370,7 @@ export const dailyAutoApply = onSchedule(
 export const computeMatchStatsNow = onRequest(
   { secrets: [OPENAI_API_KEY] },
   async (req, res) => {
-    const origin = req.get("origin") || "";
-    const allowed = new Set([
-      "https://mega-apply.web.app",
-      "https://mega-apply.firebaseapp.com",
-      "http://localhost:3000"
-    ]);
-    if (allowed.has(origin)) {
-      res.set("Access-Control-Allow-Origin", origin);
-      res.set("Vary", "Origin");
-    }
-    res.set("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
-    if (req.method === "OPTIONS") {
-      res.status(204).send("");
-      return;
-    }
+    if (applyCors(req, res)) return;
 
     const { userId } = req.query;
     if (!userId) {
@@ -1410,22 +1404,7 @@ export const computeMatchStatsNow = onRequest(
 
 export const diagnoseJobsNow = onRequest(
   async (req, res) => {
-    const origin = req.get("origin") || "";
-    const allowed = new Set([
-      "https://mega-apply.web.app",
-      "https://mega-apply.firebaseapp.com",
-      "http://localhost:3000"
-    ]);
-    if (allowed.has(origin)) {
-      res.set("Access-Control-Allow-Origin", origin);
-      res.set("Vary", "Origin");
-    }
-    res.set("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
-    if (req.method === "OPTIONS") {
-      res.status(204).send("");
-      return;
-    }
+    if (applyCors(req, res)) return;
 
     const page1 = await loadJobsPage({ startAfter: null, limit: 200 });
     const page2 = page1.lastKey
@@ -1456,26 +1435,40 @@ export const diagnoseJobsNow = onRequest(
 
 export const listJobs = onRequest(
   {
-    cors: true,
-    timeoutSeconds: 60
+    timeoutSeconds: 60,
+    memory: "512MiB"
   },
   async (req, res) => {
+    if (applyCors(req, res)) return;
     try {
       const category = (req.query.category || "").toString().trim();
       if (!category) return res.json({ jobs: [] });
       const limit = Math.min(parseInt(req.query.limit || "60", 10) || 60, 200);
-      const snap = await db
-        .ref("jobs")
-        .orderByChild("category")
-        .equalTo(category)
-        .limitToFirst(limit)
-        .get();
-      const jobs = [];
-      snap.forEach((child) => {
-        const job = toPublicJob(child.key, child.val());
-        if (job && job.title) jobs.push(job);
-      });
-      return res.json({ jobs });
+      try {
+        const snap = await db
+          .ref("jobs")
+          .orderByChild("category")
+          .equalTo(category)
+          .limitToFirst(limit)
+          .get();
+        const jobs = [];
+        snap.forEach((child) => {
+          const job = toPublicJob(child.key, child.val());
+          if (job && job.title) jobs.push(job);
+        });
+        return res.json({ jobs });
+      } catch (err) {
+        console.error("listJobs indexed query failed, falling back", err);
+        const fallbackLimit = Math.min(Math.max(limit * 5, 200), 500);
+        const fallbackSnap = await db.ref("jobs").orderByKey().limitToFirst(fallbackLimit).get();
+        const jobs = [];
+        fallbackSnap.forEach((child) => {
+          const job = toPublicJob(child.key, child.val());
+          if (!job || !job.title) return;
+          if (job.category === category) jobs.push(job);
+        });
+        return res.json({ jobs: jobs.slice(0, limit), fallback: true, fallbackLimit });
+      }
     } catch (err) {
       console.error(err);
       return res.status(500).json({ error: "list_failed" });
@@ -1485,10 +1478,10 @@ export const listJobs = onRequest(
 
 export const getJobsByIds = onRequest(
   {
-    cors: true,
     timeoutSeconds: 60
   },
   async (req, res) => {
+    if (applyCors(req, res)) return;
     try {
       const raw = (req.query.ids || "").toString();
       const ids = raw

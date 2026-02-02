@@ -60,6 +60,17 @@ export default function Dashboard() {
   const [isSaving, setIsSaving] = useState(false);
   const [isAutoApplying, setIsAutoApplying] = useState(false);
   const [exploreCategory, setExploreCategory] = useState("");
+  const [activeJob, setActiveJob] = useState(null);
+  const [showProfilePrompt, setShowProfilePrompt] = useState(false);
+  const [missingProfileFields, setMissingProfileFields] = useState([]);
+
+  function formatDescriptionSnippet(text, maxLen = 110) {
+    if (!text) return "";
+    const cleaned = String(text).replace(/\s+/g, " ").trim();
+    if (!cleaned) return "";
+    if (cleaned.length <= maxLen) return cleaned;
+    return `${cleaned.slice(0, maxLen - 1)}…`;
+  }
 
   useEffect(() => {
     if (hasSavedProfile && !matchStats) {
@@ -176,6 +187,17 @@ export default function Dashboard() {
     load();
   }, [exploreCategory, FUNCTIONS_BASE_URL]);
 
+  useEffect(() => {
+    if (!activeJob) return;
+    const handleKey = (event) => {
+      if (event.key === "Escape") {
+        setActiveJob(null);
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [activeJob]);
+
   async function uploadAsset(file, path) {
     if (!file || !user || !storage) return "";
     const sref = storageRef(storage, path);
@@ -228,8 +250,15 @@ export default function Dashboard() {
 
   async function startAutoApply() {
     if (!user || !db) return;
-    if (!profile.title && !profile.bio) {
-      setStatus("Add your job title or summary so we can match jobs.");
+    const missing = [];
+    if (!profile.name) missing.push("Full name");
+    if (!profile.title) missing.push("Job title");
+    if (!profile.bio) missing.push("Summary");
+    if (!profile.cvUrl && !profile.cvPath) missing.push("CV");
+    if (missing.length > 0) {
+      setMissingProfileFields(missing);
+      setShowProfilePrompt(true);
+      setStatus("Complete your profile to start auto apply.");
       return;
     }
     setIsAutoApplying(true);
@@ -445,18 +474,111 @@ export default function Dashboard() {
               {applications.map((app) => {
                 const job = jobsById[app.jobId] || {};
                 const title = job.title || "Job";
+                const description = job.description || "";
+                const snippet = formatDescriptionSnippet(description);
                 const date = app.appliedAt
                   ? new Date(app.appliedAt).toLocaleDateString()
                   : "—";
                 return (
                   <div className="job-row" key={app.jobId}>
-                    <div className="job-title">{title}</div>
+                    <div className="job-title">
+                      <button
+                        className="job-title-button"
+                        type="button"
+                        onClick={() => setActiveJob({ title, description })}
+                        aria-label={`Open details for ${title}`}
+                      >
+                        {title}
+                      </button>
+                      {snippet ? <span className="job-snippet"> - {snippet}</span> : null}
+                    </div>
                     <div className="job-date">{date}</div>
                   </div>
                 );
               })}
             </div>
           </div>
+
+          {activeJob && (
+            <div
+              className="job-modal-overlay"
+              role="dialog"
+              aria-modal="true"
+              aria-label={`Job details for ${activeJob.title}`}
+              onClick={() => setActiveJob(null)}
+            >
+              <div className="job-modal" onClick={(event) => event.stopPropagation()}>
+                <div className="job-modal-header">
+                  <div className="job-modal-title">{activeJob.title}</div>
+                  <button
+                    className="btn ghost"
+                    type="button"
+                    onClick={() => setActiveJob(null)}
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="job-modal-body">
+                  {activeJob.description ? activeJob.description : "No description available."}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showProfilePrompt && (
+            <div
+              className="job-modal-overlay"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Complete your profile to enable auto apply"
+              onClick={() => setShowProfilePrompt(false)}
+            >
+              <div className="job-modal profile-gate" onClick={(event) => event.stopPropagation()}>
+                <div className="job-modal-header">
+                  <div className="job-modal-title">Quick pit stop ⛽</div>
+                  <button
+                    className="btn ghost"
+                    type="button"
+                    onClick={() => setShowProfilePrompt(false)}
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="job-modal-body">
+                  <div className="profile-gate-copy">
+                    We’re ready to auto‑apply, but we need your profile tuned first.
+                    {profile.title
+                      ? ` That ${profile.title} skillset deserves the best matches.`
+                      : " Your skills deserve the best matches."}
+                  </div>
+                  {missingProfileFields.length > 0 && (
+                    <div className="profile-gate-missing">
+                      Missing: {missingProfileFields.join(", ")}
+                    </div>
+                  )}
+                  <div className="profile-gate-actions">
+                    <button
+                      className="btn pressable"
+                      type="button"
+                      onClick={() => {
+                        setShowProfilePrompt(false);
+                        setIsEditing(true);
+                      }}
+                    >
+                      Complete profile
+                    </button>
+                    <button
+                      className="btn ghost"
+                      type="button"
+                      onClick={() => setShowProfilePrompt(false)}
+                    >
+                      Not now
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
         </div>
 

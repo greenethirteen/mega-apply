@@ -20,6 +20,20 @@ export default function Home() {
   const [error, setError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const authSectionRef = useRef(null);
+  const [demoFeed, setDemoFeed] = useState([]);
+  const [demoHold, setDemoHold] = useState(false);
+  const demoIndexRef = useRef(0);
+
+  const demoJobs = [
+    { title: "Senior Electrical Engineer", company: "Gulf Energy", location: "Riyadh", category: "Electrical" },
+    { title: "HSE Site Supervisor", company: "Najd Builders", location: "Dammam", category: "HSE" },
+    { title: "Project Controls Lead", company: "Red Sands PMO", location: "NEOM", category: "Project Management" },
+    { title: "Civil QA/QC Inspector", company: "Atlas Civil", location: "Jeddah", category: "QAQC" },
+    { title: "Planning Engineer", company: "Desert Rail", location: "Tabuk", category: "Planning" },
+    { title: "Mechanical Supervisor", company: "Harbor Works", location: "Yanbu", category: "Mechanical" },
+    { title: "Procurement Coordinator", company: "Sahar Logistics", location: "Riyadh", category: "Procurement" },
+    { title: "Quantity Surveyor", company: "Eastern Infra", location: "Khobar", category: "Estimation" }
+  ];
 
   useEffect(() => {
     const a = getFirebaseAuth();
@@ -35,6 +49,24 @@ export default function Home() {
   useEffect(() => {
     trackEvent("page_view", { page: "home" });
   }, []);
+
+  useEffect(() => {
+    const tick = () => {
+      const index = demoIndexRef.current;
+      demoIndexRef.current += 1;
+      setDemoFeed((prev) => {
+        const job = demoJobs[index % demoJobs.length];
+        const item = {
+          id: `${Date.now()}-${index}`,
+          ...job
+        };
+        return [item, ...prev].slice(0, 6);
+      });
+    };
+    tick();
+    const interval = setInterval(tick, demoHold ? 4200 : 1500);
+    return () => clearInterval(interval);
+  }, [demoHold]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -82,10 +114,10 @@ export default function Home() {
         <div className="hero-grid">
           <div className="hero-copy">
             <h2>Target higher‑paying <span style={{ color: "var(--accent)" }}>engineering</span> roles faster</h2>
-            <h1>Bulk Apply to 2,000+ Jobs in Saudi Arabia 🇸🇦</h1>
+            <h1>Bulk Apply to 3,000+ Jobs in Saudi Arabia 🇸🇦</h1>
             <p>
-              MegaApply™ passively auto applies to 100s of jobs daily. It cleans
-              listings, sends applications, and gives you a daily summary.
+              MegaApply™ matches you only to roles where you’re a top fit, cleans listings,
+              and auto-applies in the background while you interview.
             </p>
             <div className="hero-actions">
               <button
@@ -109,19 +141,14 @@ export default function Home() {
             </div>
             <div className="hero-tags">
               <span className="tag">AI‑Cleaned Listings</span>
-              <span className="tag">Daily Auto‑Apply</span>
-              <span className="tag">Email Summary</span>
+              <span className="tag">Top‑Match Targeting</span>
+              <span className="tag">Always‑On Auto‑Apply</span>
             </div>
             <p className="notice auto-callout" style={{ marginTop: 12 }}>
-              Passively auto apply to 100s of jobs daily while you focus on interviews.
+              Stay focused on interviews while MegaApply™ targets your best‑fit roles.
             </p>
           </div>
           <div className="hero-art">
-            <div className="glass-card">
-              <div className="glass-title">Match Coverage</div>
-              <div className="mini-bar"><span /></div>
-              <p className="notice" style={{ marginTop: 10 }}>Applied to 128 new roles this week</p>
-            </div>
             <div className="glass-card">
               <div className="glass-title">Categories in Focus</div>
               <div className="pill-grid">
@@ -131,9 +158,26 @@ export default function Home() {
                 <span className="pill">Mechanical</span>
               </div>
             </div>
-            <div className="glass-card">
-              <div className="glass-title">Daily Summary Email</div>
-              <p className="notice">Total: 26 · HSE: 10 · Electrical: 16</p>
+            <div
+              className="glass-card auto-apply-demo"
+              onMouseEnter={() => setDemoHold(true)}
+              onMouseLeave={() => setDemoHold(false)}
+            >
+              <div className="glass-title">Auto-Apply in Action</div>
+              <p className="notice demo-status">
+                Applying now<span className="demo-dots" aria-hidden="true">...</span>
+              </p>
+              <div className="demo-scroll" role="list">
+                {demoFeed.map((job) => (
+                  <div className="demo-row" key={job.id} role="listitem">
+                    <div className="demo-title">{job.title}</div>
+                    <div className="demo-meta">
+                      {job.company} · {job.location} · {job.category}
+                    </div>
+                    <span className="demo-tag">Applied</span>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>
