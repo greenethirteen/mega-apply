@@ -40,6 +40,8 @@ const FREE_APPLY_LIMIT = parseInt(process.env.FREE_APPLY_LIMIT || "50", 10);
 const ALLOWED_ORIGINS = new Set([
   "https://mega-apply.web.app",
   "https://mega-apply.firebaseapp.com",
+  "https://megaapply.work",
+  "https://www.megaapply.work",
   "http://localhost:3000"
 ]);
 

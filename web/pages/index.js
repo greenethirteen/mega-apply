@@ -35,6 +35,36 @@ export default function Home() {
     { title: "Procurement Coordinator", company: "Sahar Logistics", location: "Riyadh", category: "Procurement" },
     { title: "Quantity Surveyor", company: "Eastern Infra", location: "Khobar", category: "Estimation" }
   ];
+  const testimonials = [
+    {
+      quote:
+        "I stopped wasting nights on job boards. MegaApply pushed my profile to relevant roles and I had two interview calls in the first week.",
+      name: "Ahmed K.",
+      role: "Electrical Engineer",
+      location: "Riyadh, Saudi Arabia"
+    },
+    {
+      quote:
+        "The quality of matches is what impressed me most. It only targeted openings that actually fit my EPC background, not random listings.",
+      name: "Sara M.",
+      role: "Planning Engineer",
+      location: "Dubai, UAE"
+    },
+    {
+      quote:
+        "I was applying manually for months with almost no response. After switching to MegaApply, my pipeline finally became consistent.",
+      name: "Usman R.",
+      role: "Mechanical Engineer",
+      location: "Lahore, Pakistan"
+    },
+    {
+      quote:
+        "For GCC jobs this is a huge time saver. I still customized for final rounds, but auto-apply handled the daily volume perfectly.",
+      name: "Priyanka S.",
+      role: "Civil Engineer",
+      location: "Pune, India"
+    }
+  ];
 
   useEffect(() => {
     const a = getFirebaseAuth();
@@ -115,11 +145,18 @@ export default function Home() {
         <div className="hero-grid">
           <div className="hero-copy">
             <h2>Target higher‑paying <span style={{ color: "var(--accent)" }}>engineering</span> roles faster</h2>
-            <h1>Bulk Apply to 3,000+ Jobs in Saudi Arabia 🇸🇦</h1>
-            <p>
-              MegaApply™ matches you only to roles where you’re a top fit,
-              and auto-applies in the background while you interview.
-            </p>
+            <h1>
+              1-Click Daily Auto Apply to 3,000+{" "}
+              <span style={{ color: "var(--accent)" }}>High Paying</span>{" "}
+              Engineering Jobs in Saudi 🇸🇦.
+            </h1>
+            <div className="step-flow" aria-label="How MegaApply works">
+              <span className="step-pill">Sign Up</span>
+              <span className="step-arrow" aria-hidden="true">&gt;</span>
+              <span className="step-pill">Upload CV</span>
+              <span className="step-arrow" aria-hidden="true">&gt;</span>
+              <span className="step-pill">MegaApply™ Auto Applies for Top Matching Jobs</span>
+            </div>
             <div className="hero-actions">
               <button
                 className="btn"
@@ -128,7 +165,7 @@ export default function Home() {
                   authSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
                 }}
               >
-                Start Auto Apply
+                Sign up
               </button>
               <button
                 className="btn secondary"
@@ -137,16 +174,9 @@ export default function Home() {
                   authSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
                 }}
               >
-                I already have an account
+                Sign in
               </button>
             </div>
-            <div className="hero-tags">
-              <span className="tag">Top‑Match Targeting</span>
-              <span className="tag">Always‑On Auto‑Apply</span>
-            </div>
-            <p className="notice auto-callout" style={{ marginTop: 12 }}>
-              Stay focused on interviews while MegaApply™ targets your best‑fit roles.
-            </p>
           </div>
           <div className="hero-art">
             <div
@@ -184,41 +214,35 @@ export default function Home() {
       </section>
 
       <section className="pricing">
-        <div className="pricing-header">
-          <div className="badge">Simple pricing</div>
-          <p className="pricing-headline">
-            Start free, then go unlimited — 50 auto‑applies free, then $5/month.
-          </p>
-        </div>
-        <div className="pricing-toggle-wrap">
-          <div className="pricing-toggle" role="tablist" aria-label="Pricing switch">
-            <button
-              className={`pricing-tab ${pricingPlan === "trial" ? "active" : ""}`}
-              type="button"
-              onClick={() => setPricingPlan("trial")}
-              role="tab"
-              aria-selected={pricingPlan === "trial"}
-            >
-              Free Trial
-            </button>
-            <button
-              className={`pricing-tab ${pricingPlan === "unlimited" ? "active" : ""}`}
-              type="button"
-              onClick={() => setPricingPlan("unlimited")}
-              role="tab"
-              aria-selected={pricingPlan === "unlimited"}
-            >
-              Unlimited
-            </button>
-          </div>
-        </div>
         <div className={`pricing-card compact ${pricingPlan === "unlimited" ? "pro" : "free"}`}>
           {pricingPlan === "unlimited" && <div className="pricing-tag">Most popular</div>}
+          <div className="pricing-card-header">
+            <div className="pricing-topline">
+              <span className="pricing-label">PRICING</span>
+              <div className="pricing-toggle" role="tablist" aria-label="Pricing switch">
+                <button
+                  className={`pricing-tab ${pricingPlan === "trial" ? "active" : ""}`}
+                  type="button"
+                  onClick={() => setPricingPlan("trial")}
+                  role="tab"
+                  aria-selected={pricingPlan === "trial"}
+                >
+                  Free Trial
+                </button>
+                <button
+                  className={`pricing-tab ${pricingPlan === "unlimited" ? "active" : ""}`}
+                  type="button"
+                  onClick={() => setPricingPlan("unlimited")}
+                  role="tab"
+                  aria-selected={pricingPlan === "unlimited"}
+                >
+                  Unlimited
+                </button>
+              </div>
+            </div>
+          </div>
           <div className="pricing-top">
             <div>
-              <div className="pricing-title">
-                {pricingPlan === "unlimited" ? "Unlimited Plan" : "Free Trial"}
-              </div>
               <p className="notice">
                 {pricingPlan === "unlimited"
                   ? "Always‑on auto‑apply with full access"
@@ -260,6 +284,29 @@ export default function Home() {
           >
             {pricingPlan === "unlimited" ? "Go unlimited" : "Start free"}
           </button>
+        </div>
+      </section>
+
+      <section className="testimonials">
+        <div className="testimonials-head">
+          <div className="badge">Customer stories</div>
+          <h2>What engineers are saying</h2>
+        </div>
+        <p className="testimonials-sub">Real hiring momentum from engineers across GCC and South Asia.</p>
+        <div className="testimonials-marquee">
+          <div className="testimonials-track">
+            {[...testimonials, ...testimonials].map((item, idx) => (
+              <article className="testimonial-card" key={`${item.name}-${item.location}-${idx}`}>
+                <div className="testimonial-stars" aria-hidden="true">★★★★★</div>
+                <p className="testimonial-quote">"{item.quote}"</p>
+                <div className="testimonial-meta">
+                  <div className="testimonial-name">{item.name}</div>
+                  <div className="testimonial-role">{item.role}</div>
+                  <div className="testimonial-location">{item.location}</div>
+                </div>
+              </article>
+            ))}
+          </div>
         </div>
       </section>
 
